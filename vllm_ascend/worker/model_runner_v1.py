@@ -44,6 +44,8 @@ from vllm.compilation.counter import compilation_counter
 from vllm.compilation.monitor import set_cudagraph_capturing_enabled
 from vllm.config import (CompilationLevel, CUDAGraphMode, VllmConfig,
                          get_layers_from_vllm_config)
+from vllm.distributed.ec_transfer import (get_ec_transfer,
+                                          has_ec_transfer)
 from vllm.distributed import tensor_model_parallel_all_gather
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
@@ -80,8 +82,9 @@ from vllm.v1.kv_cache_interface import (AttentionSpec, FullAttentionSpec,
                                         KVCacheConfig, KVCacheGroupSpec,
                                         KVCacheSpec, MambaSpec)
 # yapf: enable
-from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
-                             DraftTokenIds, LogprobsTensors, ModelRunnerOutput)
+from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, ECConnectorOutput,
+                             AsyncModelRunnerOutput, DraftTokenIds, LogprobsTensors, 
+                             ModelRunnerOutput, make_empty_encoder_model_runner_output)
 from vllm.v1.pool.metadata import PoolingMetadata
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
@@ -93,6 +96,7 @@ from vllm.v1.worker.utils import (AttentionGroup, bind_kv_cache,
                                   gather_mm_placeholders,
                                   sanity_check_mm_encoder_outputs,
                                   scatter_mm_placeholders)
+from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ascend_forward_context import (MoECommType,
@@ -235,7 +239,7 @@ class AsyncNPUModelRunnerOutput(AsyncModelRunnerOutput):
         return output
 
 
-class NPUModelRunner(LoRAModelRunnerMixin):
+class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
         self.vllm_config = vllm_config
@@ -397,7 +401,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         self.arange_np: npt.NDArray[np.int32] = np.arange(max(
             self.max_num_reqs + 1, self.model_config.max_model_len,
             self.max_num_tokens),
-                                                          dtype=np.int32)
+            dtype=np.int32)
         # NOTE(woosuk): These tensors are "stateless", i.e., they are literally
         # a faster version of creating a new tensor every time. Thus, we should
         # not make any assumptions about the values in these tensors.
@@ -588,7 +592,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             pooling_params = new_req_data.pooling_params
 
             if sampling_params and \
-                sampling_params.sampling_type == SamplingType.RANDOM_SEED:
+                    sampling_params.sampling_type == SamplingType.RANDOM_SEED:
                 generator = torch.Generator(device=self.device)
                 generator.manual_seed(sampling_params.seed)
             else:
@@ -630,6 +634,11 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     self._init_mrope_positions(self.requests[req_id])
 
             req_ids_to_add.append(req_id)
+
+        # If this rank is an EC transfer producer,
+        # skip updating the states of KV cache blocks.
+        if has_ec_transfer() and get_ec_transfer().is_producer:
+            return
 
         # Update the states of the running/resumed requests.
         is_last_rank = get_pp_group().is_last_rank
@@ -808,8 +817,8 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         num_tokens_tensor = torch.tensor([
             num_tokens if i == self.dp_rank else 0 for i in range(self.dp_size)
         ],
-                                         dtype=torch.int32,
-                                         device="npu")
+            dtype=torch.int32,
+            device="npu")
 
         flags_tensor = torch.tensor(
             [int(with_prefill), int(not enable_dbo)],
@@ -942,7 +951,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 src_end = num_computed_tokens + prompt_part_len
 
                 self.mrope_positions_cpu[:, dst_start:dst_end] = \
-                    req.mrope_positions[:,src_start:src_end]
+                    req.mrope_positions[:, src_start:src_end]
 
                 mrope_pos_ptr += prompt_part_len
 
@@ -1002,6 +1011,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 output,
                 is_embed=pos_info.is_embed,
             )
+            self.maybe_save_ec_to_connector(self.encoder_cache,
+                                            request_id=req_id,
+                                            input_id=input_id)
 
     # TODO: remove this once we drop support for vLLM 0.10.2
     def _batch_mm_kwargs_from_scheduler_0102(
@@ -1260,7 +1272,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             len(scheduler_output.scheduled_spec_decode_tokens.get(i, []))
             for num_tokens, i in zip(tokens, req_ids)
         ],
-                                    dtype=np.int32)
+            dtype=np.int32)
 
         if (self.use_aclgraph and total_num_scheduled_tokens
                 <= self.aclgraph_batch_sizes[-1]):
@@ -1401,9 +1413,13 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         # _prepare_inputs may reorder the batch, so we must gather
         # multi-modal outputs after that to ensure the correct order
         if self.is_multimodal_model:
-            # Run the multimodal encoder if any.
-            self._execute_mm_encoder(scheduler_output)
-            mm_embeds = self._gather_mm_embeddings(scheduler_output)
+            with self.maybe_get_ec_connector_output(
+                    scheduler_output,
+                    encoder_cache=self.encoder_cache,
+            ) as ec_connector_output:
+                # Run the multimodal encoder if any.
+                self._execute_mm_encoder(scheduler_output)
+                mm_embeds = self._gather_mm_embeddings(scheduler_output)
 
             # NOTE(woosuk): To unify token ids and soft tokens (vision
             # embeddings), we always use embeddings (rather than token ids)
@@ -1521,7 +1537,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             )
 
             if self.speculative_config and \
-                spec_decode_common_attn_metadata is None:
+                    spec_decode_common_attn_metadata is None:
                 spec_decode_common_attn_metadata = common_attn_metadata
 
             for attn_group in self.attn_groups[kv_cache_group_id]:
@@ -1800,8 +1816,8 @@ class NPUModelRunner(LoRAModelRunnerMixin):
     ) -> ModelRunnerOutput:
         assert self.input_batch.num_reqs ==\
             len(self.input_batch.pooling_params), \
-        "Either all or none of the requests in" \
-        " a batch must be pooling request"
+            "Either all or none of the requests in" \
+            " a batch must be pooling request"
 
         hidden_states = hidden_states[:num_scheduled_tokens]
         pooling_metadata = self.input_batch.pooling_metadata
@@ -1913,6 +1929,14 @@ class NPUModelRunner(LoRAModelRunnerMixin):
     ) -> Union[ModelRunnerOutput, AsyncModelRunnerOutput, IntermediateTensors]:
         with ProfileExecuteDuration().capture_async("prepare input"):
             self._update_states(scheduler_output)
+            if has_ec_transfer() and get_ec_transfer().is_producer:
+                with self.maybe_get_ec_connector_output(
+                        scheduler_output,
+                        encoder_cache=self.encoder_cache,
+                ) as ec_connector_output:
+                    self._execute_mm_encoder(scheduler_output)
+                    return make_empty_encoder_model_runner_output(scheduler_output)
+
             if not scheduler_output.total_num_scheduled_tokens:
                 if not has_kv_transfer_group():
                     logger.debug(
@@ -2362,7 +2386,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         # routine of FA2 for pure decode, i.e., Flashdecode + an optimization
         # for GQA/MQA.
         max_query_len = self.uniform_decode_query_len if uniform_decode else \
-                                                                num_tokens
+            num_tokens
 
         # Set num_scheduled_tokens based on num_tokens and max_num_seqs
         # for dummy run with LoRA so that the num_reqs collectively
@@ -2766,7 +2790,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                                     nope_dim)
                 rope_cache_shape = (num_blocks, block_size, num_kv_heads,
                                     rope_dim)
-                #### k cache
+                # k cache
                 # TODO(zzzzwwjj): wait transformers add these params
                 k_cache_shape = (num_blocks, block_size, 1, 128)
                 if self.vllm_config.kv_transfer_config is None:
@@ -2780,7 +2804,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     rope_cache = self._convert_torch_format(rope_cache)
                     nope_cache = self._convert_torch_format(nope_cache)
 
-                    #### k cache
+                    # k cache
                     k_cache = torch.zeros(k_cache_shape,
                                           dtype=dtype,
                                           device=self.device)
@@ -2802,7 +2826,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     rope_cache = torch.zeros(rope_allocate_shape_alignment,
                                              dtype=dtype,
                                              device=self.device)
-                    #### k cache
+                    # k cache
                     # TODO(zzzzwwjj): wait transformers add these params
                     k_allocate_shape = num_blocks * block_size * 1 * 128
                     k_allocate_shape_alignment = k_allocate_shape + alignment
@@ -2939,7 +2963,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     # for mamba linear attention
                     for layer_name_inner in kv_cache_tensor.shared_by:
                         if ("attn" in layer_name_inner and "linear_attn" not in layer_name_inner) or \
-                            layer_name_inner in kv_cache_raw_tensors.keys():
+                                layer_name_inner in kv_cache_raw_tensors.keys():
                             continue
                         if self.vllm_config.kv_transfer_config is None:
                             tensor = torch.zeros(kv_cache_tensor.size,
@@ -3323,7 +3347,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 if reorder_batch_threshold_i is not None:
                     if self.reorder_batch_threshold is not None:
                         if reorder_batch_threshold_i != \
-                            self.reorder_batch_threshold:
+                                self.reorder_batch_threshold:
                             raise ValueError(
                                 f"Attention backend reorders decodes with "
                                 f"threshold {reorder_batch_threshold_i} but other "
@@ -3340,7 +3364,10 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             KVCacheSpec: A dictionary mapping layer names to their KV cache
             format. Layers that do not need KV cache are not included.
         """
-
+        
+        if has_ec_transfer() and get_ec_transfer().is_producer:
+            return {}
+        
         block_size = self.vllm_config.cache_config.block_size
         use_mla = self.vllm_config.model_config.use_mla
         use_sfa = self.ascend_config.use_sfa
@@ -3438,7 +3465,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         aclgraph_mode = self.compilation_config.cudagraph_mode
         # check graph for mixed batch is supported
         if aclgraph_mode.mixed_mode() == CUDAGraphMode.FULL \
-            and min_ag_support != AttentionCGSupport.ALWAYS:
+                and min_ag_support != AttentionCGSupport.ALWAYS:
             msg = (f"ACLGraphMode.{aclgraph_mode.name} is not supported "
                    f"with {min_ag_builder_name} backend (support: "
                    f"{min_ag_support})")
@@ -3479,7 +3506,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         # double check that we can support full graph if they are requested
         # even after automatic downgrades
         if aclgraph_mode.has_full_cudagraphs() \
-            and min_ag_support == AttentionCGSupport.NEVER:
+                and min_ag_support == AttentionCGSupport.NEVER:
             raise ValueError(f"CUDAGraphMode.{aclgraph_mode.name} is not "
                              f"supported with {min_ag_builder_name} backend ("
                              f"support:{min_ag_support}) "
@@ -3565,9 +3592,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     raise
 
             if aclgraph_mode.decode_mode() == CUDAGraphMode.FULL and \
-                aclgraph_mode.separate_routine():
+                    aclgraph_mode.separate_routine():
                 max_num_tokens = self.scheduler_config.max_num_seqs * \
-                        self.uniform_decode_query_len
+                    self.uniform_decode_query_len
                 decode_cudagraph_batch_sizes = [
                     x for x in self.aclgraph_batch_sizes if x <= max_num_tokens
                     and x >= self.uniform_decode_query_len
