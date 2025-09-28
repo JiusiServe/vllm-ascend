@@ -51,6 +51,7 @@ from vllm.logger import logger
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.model_loader import get_model
+from vllm.model_executor.utils import send_ttft_report
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import MultiModalKwargs, PlaceholderRange
 from vllm.multimodal.utils import group_mm_inputs_by_modality
@@ -404,6 +405,9 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
 
         # NOTE: we need to use `in_profile_run` to determine whether `enable_force_load_balance` is True
         self.in_profile_run = False
+
+        # TTFT timecount
+        TTFT_ENABLE = os.environ.get("TTFT_ENABLE", "0")
 
     def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
         """Update the cached states and the persistent batch with the scheduler
@@ -1107,16 +1111,22 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         # _prepare_inputs may reorder the batch, so we must gather multi
         # modal outputs after that to ensure the correct order
         if self.is_multimodal_model:
+            if TTFT_ENABLED:
+                t_xfer_s = time.perf_counter()
             with self.maybe_get_ec_connector_output(
                     scheduler_output,
                     encoder_cache=self.encoder_cache,
             ) as ec_connector_output:
+                if TTFT_ENABLED:
+                    t_xfer_e = time.perf_counter()
+                    xfer_ms = max(0.0, (t_xfer_e - t_xfer_s) * 1000)
                 # Run the multimodal encoder if any.
                 self._execute_mm_encoder(scheduler_output)
                 mm_embeds = self._gather_mm_embeddings(scheduler_output)
         else:
             mm_embeds = []
-
+        if TTFT_ENABLED:
+            t_prefill_s = time.perf_counter()
         if self.is_multimodal_model:
             # NOTE(woosuk): To unify token ids and soft tokens (vision
             # embeddings), we always use embeddings (rather than token ids)
@@ -1218,6 +1228,17 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             sample_indices = nn.functional.pad(
                 sample_indices,
                 (0, padded_num_indices - sample_indices.shape[0]))
+        if TTFT_ENABLED:
+            t_prefill_e = time.perf_counter()
+            prefill_ms = max(0.0, (t_prefill_e - t_prefill_s) * 1000)
+            for req_id in scheduler_output.num_scheduled_tokens.keys():
+                send_ttft_report({
+                    "role": "pd",
+                    "request_id": req_id,   # 对 PD 路径通常就是父 ID
+                    "emb_cache_transfer_time_ms": xfer_ms if self.supports_mm_inputs else 0.0,
+                    "prefill_compute_time_ms": prefill_ms,
+                    # prefill_queue_time_ms 建议在 Scheduler 上报；此处不填
+            })
 
         return (attn_metadata, hidden_states, spec_decode_metadata, positions,
                 total_num_scheduled_tokens, sample_indices, finished_sending,
@@ -1406,7 +1427,19 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                         scheduler_output,
                         encoder_cache=self.encoder_cache,
                 ) as ec_connector_output:
+                    # timecount for encoder
+                    if TTFT_ENABLED:
+                        t_enc_s = time.perf_counter()
                     self._execute_mm_encoder(scheduler_output)
+                    if TTFT_ENABLED:
+                        t_enc_e = time.perf_counter()
+                        enc_ms = (t_enc_e - t_enc_s) * 1000
+                        for req_id in scheduler_output.scheduled_encoder_inputs.keys():
+                            send_ttft_report({
+                                "role": "encoder",
+                                "request_id": req_id,
+                                "enc_compute_time_ms": enc_ms,
+                            })
                     return make_empty_encoder_model_runner_output(scheduler_output)
 
             if not scheduler_output.total_num_scheduled_tokens:
