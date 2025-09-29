@@ -19,6 +19,7 @@
 
 import copy
 import gc
+import os
 import math
 import time
 import types
@@ -407,7 +408,7 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         self.in_profile_run = False
 
         # TTFT timecount
-        TTFT_ENABLE = os.environ.get("TTFT_ENABLE", "0")
+        self.TTFT_ENABLE = os.environ.get("TTFT_ENABLE", "0")
         self._ttft_prefill_compute_reported: set[str] = set()
 
     def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
