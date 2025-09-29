@@ -19,8 +19,8 @@
 
 import copy
 import gc
-import os
 import math
+import os
 import time
 import types
 import weakref
@@ -408,7 +408,7 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         self.in_profile_run = False
 
         # TTFT timecount
-        self.TTFT_ENABLE = os.environ.get("TTFT_ENABLE", "0")
+        self.TTFT_ENABLED = os.environ.get("TTFT_ENABLED", "0")
         self._ttft_prefill_compute_reported: set[str] = set()
 
     def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
@@ -1445,7 +1445,7 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                             rid = req_id
                             if rid.startswith("chatcmpl-"):
                                 rid = rid[len("chatcmpl-"):]
-                            payload = {
+                            payload={
                                 "role": "encoder",
                                 "request_id": rid,
                                 "enc_compute_time_ms": enc_ms,
