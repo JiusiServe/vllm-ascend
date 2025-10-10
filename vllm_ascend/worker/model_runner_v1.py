@@ -52,7 +52,6 @@ from vllm.logger import logger
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.model_loader import get_model
-from vllm.model_executor.utils import send_ttft_report
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import MultiModalKwargs, PlaceholderRange
 from vllm.multimodal.utils import group_mm_inputs_by_modality
@@ -78,6 +77,9 @@ from vllm.v1.worker.utils import (gather_mm_placeholders,
                                   sanity_check_mm_encoder_outputs,
                                   scatter_mm_placeholders)
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
+from vllm.metrics.ttft import (
+    observe_prefill_compute, observe_emb_cache_transfer, observe_enc_compute, observe_total
+)
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ascend_forward_context import set_ascend_forward_context
@@ -1235,17 +1237,12 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             prefill_ms = max(0.0, (t_prefill_e - t_prefill_s) * 1000)
             for req_id in scheduler_output.num_scheduled_tokens.keys():
                 if req_id not in self._ttft_prefill_compute_reported:
-                    rid = req_id
-                    if rid.startswith("chatcmpl-"):
-                        rid = rid[len("chatcmpl-"):]
-                    payload = {
-                        "role": "pd",
-                        "request_id": rid,
-                        "emb_cache_transfer_time_ms": xfer_ms if mm_embeds else 0.0,
-                        "prefill_compute_time_ms": prefill_ms,
-                    }
                     self._ttft_prefill_compute_reported.add(req_id)
-                    send_ttft_report(payload)
+                    model_name = self.vllm_config.model_config.model
+                    instance_id = getattr(self.vllm_config, "instance_id", None)
+                    is_mm = True
+                    observe_prefill_compute(prefill_ms, model_name, instance_id, is_mm)
+                    observe_emb_cache_transfer(xfer_ms if mm_embeds else 0.0, model_name, instance_id, is_mm)
 
         return (attn_metadata, hidden_states, spec_decode_metadata, positions,
                 total_num_scheduled_tokens, sample_indices, finished_sending,
@@ -1442,15 +1439,11 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                         t_enc_e = time.perf_counter()
                         enc_ms = (t_enc_e - t_enc_s) * 1000
                         for req_id in scheduler_output.scheduled_encoder_inputs.keys():
-                            rid = req_id
-                            if rid.startswith("chatcmpl-"):
-                                rid = rid[len("chatcmpl-"):]
-                            payload={
-                                "role": "encoder",
-                                "request_id": rid,
-                                "enc_compute_time_ms": enc_ms,
-                            }
-                            send_ttft_report(payload)
+                            self._ttft_prefill_compute_reported.add(req_id)
+                            model_name = self.vllm_config.model_config.model
+                            instance_id = getattr(self.vllm_config, "instance_id", None)
+                            is_mm = True
+                            observe_enc_compute(enc_ms, model_name, instance_id, is_mm)
                     return make_empty_encoder_model_runner_output(scheduler_output)
 
             if not scheduler_output.total_num_scheduled_tokens:
