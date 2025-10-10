@@ -410,7 +410,8 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         self.in_profile_run = False
 
         # TTFT timecount
-        self.TTFT_ENABLED = os.environ.get("TTFT_ENABLED", "0")
+        self.TTFT_ENABLED = os.environ.get("TTFT_ENABLED",
+                                           "0").lower() in ("1", "true", "yes")
         self._ttft_prefill_compute_reported: set[str] = set()
 
     def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
