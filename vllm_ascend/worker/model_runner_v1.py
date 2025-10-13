@@ -78,7 +78,7 @@ from vllm.v1.worker.utils import (gather_mm_placeholders,
                                   scatter_mm_placeholders)
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 from vllm.metrics.ttft import (
-    observe_prefill_compute, observe_emb_cache_transfer, observe_enc_compute
+    observe_prefill_compute, observe_e_cache_transfer, observe_enc_compute
 )
 
 from vllm_ascend.ascend_config import get_ascend_config
@@ -1245,7 +1245,7 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                     model_name = self.vllm_config.model_config.model
                     is_mm = True
                     observe_prefill_compute(prefill_ms, model_name, self.ec_role, is_mm)
-                    observe_emb_cache_transfer(xfer_ms if mm_embeds else 0.0, model_name, self.ec_role, is_mm)
+                    observe_e_cache_transfer(xfer_ms if mm_embeds else 0.0, model_name, self.ec_role, is_mm)
 
         return (attn_metadata, hidden_states, spec_decode_metadata, positions,
                 total_num_scheduled_tokens, sample_indices, finished_sending,
