@@ -412,7 +412,10 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         # TTFT timecount
         self.TTFT_ENABLED = os.environ.get("TTFT_ENABLED",
                                            "0").lower() in ("1", "true", "yes")
-        self._ttft_prefill_compute_reported: set[str] = set()
+        if self.TTFT_ENABLED:
+            self._ttft_prefill_compute_reported: set[str] = set()
+            self.ec_role:str = self.vllm_config.ec_transfer_config.ec_role
+
 
     def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
         """Update the cached states and the persistent batch with the scheduler
@@ -1240,10 +1243,9 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 if req_id not in self._ttft_prefill_compute_reported:
                     self._ttft_prefill_compute_reported.add(req_id)
                     model_name = self.vllm_config.model_config.model
-                    instance_id = getattr(self.vllm_config, "instance_id", None)
                     is_mm = True
-                    observe_prefill_compute(prefill_ms, model_name, instance_id, is_mm)
-                    observe_emb_cache_transfer(xfer_ms if mm_embeds else 0.0, model_name, instance_id, is_mm)
+                    observe_prefill_compute(prefill_ms, model_name, self.ec_role, is_mm)
+                    observe_emb_cache_transfer(xfer_ms if mm_embeds else 0.0, model_name, self.ec_role, is_mm)
 
         return (attn_metadata, hidden_states, spec_decode_metadata, positions,
                 total_num_scheduled_tokens, sample_indices, finished_sending,
@@ -1442,9 +1444,8 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                         for req_id in scheduler_output.scheduled_encoder_inputs.keys():
                             self._ttft_prefill_compute_reported.add(req_id)
                             model_name = self.vllm_config.model_config.model
-                            instance_id = getattr(self.vllm_config, "instance_id", None)
                             is_mm = True
-                            observe_enc_compute(enc_ms, model_name, instance_id, is_mm)
+                            observe_enc_compute(enc_ms, model_name, self.ec_role, is_mm)
                     return make_empty_encoder_model_runner_output(scheduler_output)
 
             if not scheduler_output.total_num_scheduled_tokens:
