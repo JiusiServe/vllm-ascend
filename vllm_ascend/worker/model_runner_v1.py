@@ -78,7 +78,7 @@ from vllm.v1.worker.utils import (gather_mm_placeholders,
                                   scatter_mm_placeholders)
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 from vllm.metrics.ttft import (
-    observe_prefill_compute, observe_emb_cache_transfer, observe_enc_compute, observe_total
+    observe_prefill_compute, observe_emb_cache_transfer, observe_enc_compute
 )
 
 from vllm_ascend.ascend_config import get_ascend_config
