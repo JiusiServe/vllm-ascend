@@ -77,7 +77,7 @@ from vllm.v1.worker.utils import (gather_mm_placeholders,
                                   sanity_check_mm_encoder_outputs,
                                   scatter_mm_placeholders)
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
-from vllm.examples.online_serving.epd.epd_timecount import (
+from vllm.disaggregated.epd_timecount import (
     observe_prefill_compute, observe_load_e_cache, observe_enc_compute
 )
 from vllm_ascend.ascend_config import get_ascend_config
@@ -1242,9 +1242,10 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 if req_id not in self._ttft_prefill_compute_reported:
                     self._ttft_prefill_compute_reported.add(req_id)
                     model_name = self.vllm_config.model_config.model
+                    instance_id = getattr(self.vllm_config, "instance_id", None)
                     is_mm = True
-                    observe_prefill_compute(prefill_forward_s, model_name, self.ec_role, is_mm)
-                    observe_load_e_cache(xfer_s if mm_embeds else 0.0, model_name, self.ec_role, is_mm)
+                    observe_prefill_compute(prefill_forward_s, model_name, self.ec_role, is_mm, instance_id)
+                    observe_load_e_cache(xfer_s if mm_embeds else 0.0, model_name, self.ec_role, is_mm, instance_id)
 
         return (attn_metadata, hidden_states, spec_decode_metadata, positions,
                 total_num_scheduled_tokens, sample_indices, finished_sending,
@@ -1443,8 +1444,9 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                         for req_id in scheduler_output.scheduled_encoder_inputs.keys():
                             self._ttft_prefill_compute_reported.add(req_id)
                             model_name = self.vllm_config.model_config.model
+                            instance_id = getattr(self.vllm_config, "instance_id", None)
                             is_mm = True
-                            observe_enc_compute(enc_s, model_name, self.ec_role, is_mm)
+                            observe_enc_compute(enc_s, model_name, self.ec_role, is_mm, instance_id)
                     return make_empty_encoder_model_runner_output(scheduler_output)
 
             if not scheduler_output.total_num_scheduled_tokens:
