@@ -77,10 +77,9 @@ from vllm.v1.worker.utils import (gather_mm_placeholders,
                                   sanity_check_mm_encoder_outputs,
                                   scatter_mm_placeholders)
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
-from vllm.metrics.ttft import (
-    observe_prefill_compute, observe_e_cache_transfer, observe_enc_compute
+from vllm.examples.online_serving.epd.epd_timecount import (
+    observe_prefill_compute, observe_load_e_cache, observe_enc_compute
 )
-
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ascend_forward_context import set_ascend_forward_context
 from vllm_ascend.attention.attention import AttentionMaskBuilder
@@ -410,9 +409,9 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         self.in_profile_run = False
 
         # TTFT timecount
-        self.TTFT_ENABLED = os.environ.get("TTFT_ENABLED",
+        self.EPD_TIMECOUNT_ENABLED = os.environ.get("EPD_TIMECOUNT_ENABLED",
                                            "0").lower() in ("1", "true", "yes")
-        if self.TTFT_ENABLED:
+        if self.EPD_TIMECOUNT_ENABLED:
             self._ttft_prefill_compute_reported: set[str] = set()
             self.ec_role:str = self.vllm_config.ec_transfer_config.ec_role
 
@@ -1119,21 +1118,21 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         # _prepare_inputs may reorder the batch, so we must gather multi
         # modal outputs after that to ensure the correct order
         if self.is_multimodal_model:
-            if self.TTFT_ENABLED:
+            if self.EPD_TIMECOUNT_ENABLED:
                 t_xfer_s = time.perf_counter()
             with self.maybe_get_ec_connector_output(
                     scheduler_output,
                     encoder_cache=self.encoder_cache,
             ) as ec_connector_output:
-                if self.TTFT_ENABLED:
+                if self.EPD_TIMECOUNT_ENABLED:
                     t_xfer_e = time.perf_counter()
-                    xfer_ms = max(0.0, (t_xfer_e - t_xfer_s) * 1000)
+                    xfer_s = max(0.0, t_xfer_e - t_xfer_s)
                 # Run the multimodal encoder if any.
                 self._execute_mm_encoder(scheduler_output)
                 mm_embeds = self._gather_mm_embeddings(scheduler_output)
         else:
             mm_embeds = []
-        if self.TTFT_ENABLED:
+        if self.EPD_TIMECOUNT_ENABLED:
             t_prefill_s = time.perf_counter()
         if self.is_multimodal_model:
             # NOTE(woosuk): To unify token ids and soft tokens (vision
@@ -1236,16 +1235,16 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             sample_indices = nn.functional.pad(
                 sample_indices,
                 (0, padded_num_indices - sample_indices.shape[0]))
-        if self.TTFT_ENABLED:
+        if self.EPD_TIMECOUNT_ENABLED:
             t_prefill_e = time.perf_counter()
-            prefill_ms = max(0.0, (t_prefill_e - t_prefill_s) * 1000)
+            prefill_forward_s = max(0.0, t_prefill_e - t_prefill_s)
             for req_id in scheduler_output.num_scheduled_tokens.keys():
                 if req_id not in self._ttft_prefill_compute_reported:
                     self._ttft_prefill_compute_reported.add(req_id)
                     model_name = self.vllm_config.model_config.model
                     is_mm = True
-                    observe_prefill_compute(prefill_ms, model_name, self.ec_role, is_mm)
-                    observe_e_cache_transfer(xfer_ms if mm_embeds else 0.0, model_name, self.ec_role, is_mm)
+                    observe_prefill_compute(prefill_forward_s, model_name, self.ec_role, is_mm)
+                    observe_load_e_cache(xfer_s if mm_embeds else 0.0, model_name, self.ec_role, is_mm)
 
         return (attn_metadata, hidden_states, spec_decode_metadata, positions,
                 total_num_scheduled_tokens, sample_indices, finished_sending,
@@ -1435,17 +1434,17 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                         encoder_cache=self.encoder_cache,
                 ) as ec_connector_output:
                     # timecount for encoder
-                    if self.TTFT_ENABLED:
+                    if self.EPD_TIMECOUNT_ENABLED:
                         t_enc_s = time.perf_counter()
                     self._execute_mm_encoder(scheduler_output)
-                    if self.TTFT_ENABLED:
+                    if self.EPD_TIMECOUNT_ENABLED:
                         t_enc_e = time.perf_counter()
-                        enc_ms = (t_enc_e - t_enc_s) * 1000
+                        enc_s = t_enc_e - t_enc_s
                         for req_id in scheduler_output.scheduled_encoder_inputs.keys():
                             self._ttft_prefill_compute_reported.add(req_id)
                             model_name = self.vllm_config.model_config.model
                             is_mm = True
-                            observe_enc_compute(enc_ms, model_name, self.ec_role, is_mm)
+                            observe_enc_compute(enc_s, model_name, self.ec_role, is_mm)
                     return make_empty_encoder_model_runner_output(scheduler_output)
 
             if not scheduler_output.total_num_scheduled_tokens:
