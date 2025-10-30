@@ -1012,7 +1012,7 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 is_embed=pos_info.is_embed,
             )
             self.maybe_save_ec_to_connector(
-                encoder=self.encoder_cache,
+                encoder_cache=self.encoder_cache,
                 mm_hash=mm_hash)
               
     # TODO: remove this once we drop support for vLLM 0.10.2
