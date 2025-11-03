@@ -20,6 +20,8 @@ from typing import Any, Dict, Optional
 import torch
 import torch_npu
 
+from vllm.distributed.ec_transfer import get_ec_transfer, has_ec_transfer
+
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.utils import ACL_FORMAT_FRACTAL_NZ
 
@@ -123,6 +125,8 @@ class AscendW8A8LinearMethod:
             layer.weight.data = layer.weight.data.transpose(0, 1).contiguous()
         if self.enable_weight_nz_layout:
             # cast quantized weight tensors in NZ layout for higher inference speed
+            if has_ec_transfer() and not get_ec_transfer().is_producer:
+                torch.npu.config.allow_internal_format = True
             layer.weight.data = torch_npu.npu_format_cast(
                 layer.weight.data, ACL_FORMAT_FRACTAL_NZ)
         layer.weight_scale.data = torch.flatten(layer.weight_scale.data)
