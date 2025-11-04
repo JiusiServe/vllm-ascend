@@ -29,6 +29,7 @@ class AscendSchedulerConfig(SchedulerConfig):
         "vllm_ascend.core.scheduler.AscendScheduler")
     enable_pd_transfer: bool = False
     decode_max_num_seqs: int = 0
+    external_parameters = None 
 
     @classmethod
     def initialize_from_config(
@@ -44,7 +45,8 @@ class AscendSchedulerConfig(SchedulerConfig):
         scheduler_config["enable_chunked_prefill"] = False
         scheduler_config["policy"] = "fcfs"
         scheduler_config["scheduler_cls"] = (
-            "vllm_ascend.core.scheduler.AscendScheduler")
+            "vllm_ascend.core.ewsjf_scheduler.scheduler.EWSJFAscendScheduler")
+        print(f'--------------------------------------scheduler: {scheduler_config["scheduler_cls"]}----------------------')
         scheduler_config["enable_pd_transfer"] = False
         scheduler_config["decode_max_num_seqs"] = 0
         # Override params in original SchedulerConfig with params in ascend_scheduler_config

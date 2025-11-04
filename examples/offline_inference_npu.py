@@ -20,7 +20,7 @@
 # isort: skip_file
 import os
 
-os.environ["VLLM_USE_MODELSCOPE"] = "True"
+os.environ["VLLM_USE_MODELSCOPE"] = "False"
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 from vllm import LLM, SamplingParams

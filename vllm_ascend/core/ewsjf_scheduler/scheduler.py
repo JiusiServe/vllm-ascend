@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from typing import Dict, List, Optional, Tuple, Deque, Union
 from sortedcontainers import SortedDict
 
-from vllm.v1.core.sched.ewsjf_scheduler.waiting_queue import WaitingQueue, QueueInfo
+from vllm_ascend.core.ewsjf_scheduler.waiting_queue import WaitingQueue, QueueInfo
 # EWSJF MODIFICATION: Import the parent Scheduler class to inherit from it.
 from vllm.v1.core.sched.scheduler import Scheduler
 from vllm.config import VllmConfig
@@ -21,12 +21,12 @@ from vllm.v1.core.sched.output import SchedulerOutput, NewRequestData
 from vllm.v1.engine import EngineCoreEventType
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.metrics.stats import SchedulerStats
-from vllm.distributed.kv_transfer.kv_connector.v1.metrics import KVConnectorStats
+#from vllm.distributed.kv_transfer.kv_connector.v1.metrics import KVConnectorStats
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.spec_decode.metrics import SpecDecodingStats
 from vllm.v1.structured_output import StructuredOutputManager
 from vllm.distributed.kv_events import KVEventBatch
-from vllm.v1.core.sched.ewsjf_scheduler.scoring import SimpleScoreCalculator
+from vllm_ascend.core.ewsjf_scheduler.scoring import SimpleScoreCalculator
 import itertools
 import time
 from collections import defaultdict, deque
@@ -40,7 +40,7 @@ from vllm.distributed.kv_transfer.kv_connector.v1 import (
     KVConnectorBase_V1,
     KVConnectorRole,
 )
-from vllm.distributed.kv_transfer.kv_connector.v1.metrics import KVConnectorStats
+#from vllm.distributed.kv_transfer.kv_connector.v1.metrics import KVConnectorStats
 from vllm.logger import init_logger
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.v1.core.encoder_cache_manager import (
@@ -65,7 +65,7 @@ from vllm_ascend.core.scheduler import AscendScheduler
 logger = init_logger(__name__)
 
 
-class EWSJFScheduler(AscendScheduler):
+class EWSJFAscendScheduler(AscendScheduler):
     """
     EWSJF (Estimated Weighted Shortest Job First) Scheduler.
 
