@@ -1051,7 +1051,7 @@ class EWSJFAscendScheduler(AscendScheduler):
                     if queue.removable:
                         queue.increment_empty_count()
                         # Mark for removal if empty too long
-                        if queue.empty_count >= self.empty_queue_threshold and len(self.queues) > 1:
+                        if queue.empty_count >= self.empty_queue_threshold and len(self.waiting.queues) > 1:
                             queues_to_remove.append(queue)
                     else:
                         # Non-removable empty queues get score 0
