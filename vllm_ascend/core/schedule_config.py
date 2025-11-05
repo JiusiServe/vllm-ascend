@@ -14,7 +14,10 @@
 # limitations under the License.
 # This file is a part of the vllm-ascend project.
 #
-
+import importlib
+import inspect
+import json
+import os
 from dataclasses import dataclass, fields
 from typing import Type, Union
 
@@ -29,7 +32,7 @@ class AscendSchedulerConfig(SchedulerConfig):
         "vllm_ascend.core.scheduler.AscendScheduler")
     enable_pd_transfer: bool = False
     decode_max_num_seqs: int = 0
-    external_parameters = None 
+    external_parameters = None
 
     @classmethod
     def initialize_from_config(
@@ -47,6 +50,21 @@ class AscendSchedulerConfig(SchedulerConfig):
         scheduler_config["scheduler_cls"] = (
             "vllm_ascend.core.ewsjf_scheduler.scheduler.EWSJFAscendScheduler")
         print(f'--------------------------------------scheduler: {scheduler_config["scheduler_cls"]}----------------------')
+
+        module_name, class_name = scheduler_config["scheduler_cls"].rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        cls_ = getattr(module, class_name)
+
+        module_file = inspect.getfile(cls_)
+        module_dir = os.path.dirname(module_file)
+
+        config_path = os.path.join(module_dir, "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                scheduler_config["external_parameters"] = json.load(f)
+                print(
+                    f'--------------------------------------Loading external parameters: {scheduler_config["external_parameters"]}----------------------')
+
         scheduler_config["enable_pd_transfer"] = False
         scheduler_config["decode_max_num_seqs"] = 0
         # Override params in original SchedulerConfig with params in ascend_scheduler_config
@@ -54,6 +72,19 @@ class AscendSchedulerConfig(SchedulerConfig):
             if hasattr(ascend_scheduler_config, k):
                 scheduler_config[k] = getattr(ascend_scheduler_config, k)
         return cls(**scheduler_config)
+
+    def load_external_parameters(self):
+        module_name, class_name = self.scheduler_cls.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        cls = getattr(module, class_name)
+
+        module_file = inspect.getfile(cls)
+        module_dir = os.path.dirname(module_file)
+
+        config_path = os.path.join(module_dir, "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                self.external_parameters = json.load(f)
 
     def __post_init__(self) -> None:
         self.max_num_encoder_input_tokens = self.max_num_batched_tokens
