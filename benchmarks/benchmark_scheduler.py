@@ -57,7 +57,7 @@ async def main_ewsjf(queues_config):
     external_parameters = {"queues_config": queues_config, "step_size": 1500}
     engine_args = AsyncEngineArgs(
         model="Qwen/Qwen2.5-0.5B-Instruct", #"meta-llama/Meta-Llama-3-8B",
-        # scheduler_cls=SCHEDULER_CLS['ewsjf'],
+        scheduler_cls="ewsjf",
         # external_parameters=external_parameters,
         # tensor_parallel_size=2
     )
@@ -84,9 +84,9 @@ async def main_fcfs():
 
 
 async def main(queues_config):
-    await main_ewsjf(queues_config)
-
     await main_fcfs()
+
+    await main_ewsjf(queues_config)
 
 
 async def run_engine(engine_args, prompts, sampling_params, rate):

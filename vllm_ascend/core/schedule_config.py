@@ -47,8 +47,13 @@ class AscendSchedulerConfig(SchedulerConfig):
         # Override default values into original SchedulerConfig
         scheduler_config["enable_chunked_prefill"] = False
         scheduler_config["policy"] = "fcfs"
-        scheduler_config["scheduler_cls"] = (
-            "vllm_ascend.core.ewsjf_scheduler.scheduler.EWSJFAscendScheduler")
+
+        if scheduler_config["scheduler_cls"] == "ewsjf":
+            scheduler_config["scheduler_cls"] = (
+                "vllm_ascend.core.ewsjf_scheduler.scheduler.EWSJFAscendScheduler")
+        else:
+            scheduler_config["scheduler_cls"] = (
+                "vllm_ascend.core.scheduler.AscendScheduler")
         print(f'--------------------------------------scheduler: {scheduler_config["scheduler_cls"]}----------------------')
 
         scheduler_config["enable_pd_transfer"] = False
