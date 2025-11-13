@@ -75,7 +75,7 @@ class EWSJFAscendScheduler(AscendScheduler):
 
         # EWSJF MODIFICATION: Initialize with the new queue structure
         self.external_parameters = self.vllm_config.scheduler_config.external_parameters
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         if self.external_parameters and 'step_size' in self.external_parameters:
             self.step_size: int = self.external_parameters['step_size']
         else:
