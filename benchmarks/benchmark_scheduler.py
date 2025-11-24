@@ -49,34 +49,33 @@ async def send_requests_with_rate_limit(engine, prompts, sampling_params, reques
 async def main_ewsjf(queues_config):
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=100, min_tokens=1)
 
-    dataset = load_dataset("ChayaLevi/data-100-2000")
+    dataset = load_dataset("ChayaLevi/data-100-16000")
     prompts = list(dataset['train']['input'])
 
     rates = [100]#[1000, 500, 100, 60, 40, 20, 10]
 
     external_parameters = {"queues_config": queues_config, "step_size": 1500}
     engine_args = AsyncEngineArgs(
-        model="Qwen/Qwen2.5-0.5B-Instruct", #"meta-llama/Meta-Llama-3-8B",
+        model="Qwen/Qwen2.5-7B-Instruct", #"meta-llama/Meta-Llama-3-8B",
         scheduler_cls="ewsjf",
         # external_parameters=external_parameters,
-        # tensor_parallel_size=2
+        tensor_parallel_size=2
     )
     # Qwen/Qwen2.5-0.5B-Instruct
     for i in range(len(rates)):
-
         await run_engine(engine_args, prompts, sampling_params, rates[i])
 
 
 async def main_fcfs():
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=100, min_tokens=1)
 
-    dataset = load_dataset("ChayaLevi/data-100-2000")
+    dataset = load_dataset("ChayaLevi/data-100-16000")
     prompts = list(dataset['train']['input'])
 
     rates = [100]#[1000, 500, 100, 60, 40, 20, 10]
     engine_args = AsyncEngineArgs(
-        model="Qwen/Qwen2.5-0.5B-Instruct", #"meta-llama/Meta-Llama-3-8B",
-        # tensor_parallel_size=2
+        model="Qwen/Qwen2.5-7B-Instruct", #"meta-llama/Meta-Llama-3-8B",
+        tensor_parallel_size=2
     )
 
     for i in range(len(rates)):
@@ -148,37 +147,70 @@ async def metrics(total_runtime, prompts, outputs):
 
 
 if __name__ == "__main__":
-    queues_30_100_2000 = [{'boundaries': (100, 163)},
-                 {'boundaries': (164, 226)},
-                 {'boundaries': (227, 289)},
-                 {'boundaries': (290, 352)},
-                 {'boundaries': (353, 415)},
-                 {'boundaries': (416, 478)},
-                 {'boundaries': (479, 541)},
-                 {'boundaries': (542, 604)},
-                 {'boundaries': (605, 667)},
-                 {'boundaries': (668, 730)},
-                 {'boundaries': (731, 793)},
-                 {'boundaries': (794, 856)},
-                 {'boundaries': (857, 919)},
-                 {'boundaries': (920, 982)},
-                 {'boundaries': (983, 1045)},
-                 {'boundaries': (1046, 1108)},
-                 {'boundaries': (1109, 1171)},
-                 {'boundaries': (1172, 1234)},
-                 {'boundaries': (1235, 1297)},
-                 {'boundaries': (1298, 1360)},
-                 {'boundaries': (1361, 1423)},
-                 {'boundaries': (1424, 1486)},
-                 {'boundaries': (1487, 1549)},
-                 {'boundaries': (1550, 1612)},
-                 {'boundaries': (1613, 1675)},
-                 {'boundaries': (1676, 1738)},
-                 {'boundaries': (1739, 1801)},
-                 {'boundaries': (1802, 1864)},
-                 {'boundaries': (1865, 1927)},
-                 {'boundaries': (1928, 2000)}]
+    queues_30_100_16000 = [
+        {'boundaries': (100, 633)},
+        {'boundaries': (634, 1167)},
+        {'boundaries': (1168, 1701)},
+        {'boundaries': (1702, 2235)},
+        {'boundaries': (2236, 2769)},
+        {'boundaries': (2770, 3293)},
+        {'boundaries': (3294, 3817)},
+        {'boundaries': (3818, 4341)},
+        {'boundaries': (4342, 4865)},
+        {'boundaries': (4866, 5389)},
+        {'boundaries': (5390, 5913)},
+        {'boundaries': (5914, 6437)},
+        {'boundaries': (6438, 6961)},
+        {'boundaries': (6962, 7485)},
+        {'boundaries': (7486, 8009)},
+        {'boundaries': (8010, 8533)},
+        {'boundaries': (8534, 9057)},
+        {'boundaries': (9058, 9581)},
+        {'boundaries': (9582, 10105)},
+        {'boundaries': (10106, 10629)},
+        {'boundaries': (10630, 11153)},
+        {'boundaries': (11154, 11677)},
+        {'boundaries': (11678, 12101)},
+        {'boundaries': (12102, 12625)},
+        {'boundaries': (12626, 13149)},
+        {'boundaries': (13150, 13673)},
+        {'boundaries': (13674, 14197)},
+        {'boundaries': (14198, 14721)},
+        {'boundaries': (14722, 15245)},
+        {'boundaries': (15246, 16000)}
+    ]
+
+    # queues_30_100_2000 = [{'boundaries': (100, 163)},
+    #              {'boundaries': (164, 226)},
+    #              {'boundaries': (227, 289)},
+    #              {'boundaries': (290, 352)},
+    #              {'boundaries': (353, 415)},
+    #              {'boundaries': (416, 478)},
+    #              {'boundaries': (479, 541)},
+    #              {'boundaries': (542, 604)},
+    #              {'boundaries': (605, 667)},
+    #              {'boundaries': (668, 730)},
+    #              {'boundaries': (731, 793)},
+    #              {'boundaries': (794, 856)},
+    #              {'boundaries': (857, 919)},
+    #              {'boundaries': (920, 982)},
+    #              {'boundaries': (983, 1045)},
+    #              {'boundaries': (1046, 1108)},
+    #              {'boundaries': (1109, 1171)},
+    #              {'boundaries': (1172, 1234)},
+    #              {'boundaries': (1235, 1297)},
+    #              {'boundaries': (1298, 1360)},
+    #              {'boundaries': (1361, 1423)},
+    #              {'boundaries': (1424, 1486)},
+    #              {'boundaries': (1487, 1549)},
+    #              {'boundaries': (1550, 1612)},
+    #              {'boundaries': (1613, 1675)},
+    #              {'boundaries': (1676, 1738)},
+    #              {'boundaries': (1739, 1801)},
+    #              {'boundaries': (1802, 1864)},
+    #              {'boundaries': (1865, 1927)},
+    #              {'boundaries': (1928, 2000)}]
 
     # asyncio.run(main_ewsjf(queues_30_100_2000))
     # asyncio.run(main_fcfs())
-    asyncio.run(main(queues_30_100_2000))
+    asyncio.run(main(queues_30_100_16000))
