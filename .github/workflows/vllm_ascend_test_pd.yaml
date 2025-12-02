@@ -112,5 +112,5 @@ jobs:
           bash tests/e2e/pd_disaggreate/run_edge_case_test.sh
 
       - name: Run vllm-project/vllm-ascend PD Disaggregation test with YuanRong Connector
-          run: |
-            pytest -sv tests/e2e/pd_disaggreate/yuanrong/test_yuanrong_connector.py
+        run: |
+          pytest -sv tests/e2e/pd_disaggreate/yuanrong/test_yuanrong_connector.py
