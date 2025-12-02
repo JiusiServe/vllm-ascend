@@ -40,6 +40,5 @@ def register_connector():
         "MooncakeLayerwiseConnector")
 
     KVConnectorFactory.register_connector(
-        "YuanRongConnector",
-        "vllm_ascend.distributed.yuanrong_connector",
+        "YuanRongConnector", "vllm_ascend.distributed.yuanrong_connector",
         "YuanRongConnector")

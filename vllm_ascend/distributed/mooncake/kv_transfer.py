@@ -13,10 +13,17 @@ from vllm_ascend.distributed.mooncake.mooncake_store import Mooncakestore
 
 class KVTransferThread(threading.Thread):
 
-    def __init__(self, tp_rank: int, tp_size: int, m_store: Mooncakestore,
+    def __init__(self,
+                 tp_rank: int,
+                 tp_size: int,
+                 m_store: Mooncakestore,
                  local_kv_caches_base_addr: list[int],
-                 token_database: ChunkedTokenDatabase, block_len: list[int],
-                 block_size: int, ready_event: threading.Event, name: str, kv_caches: dict[str, torch.Tensor] = None):
+                 token_database: ChunkedTokenDatabase,
+                 block_len: list[int],
+                 block_size: int,
+                 ready_event: threading.Event,
+                 name: str,
+                 kv_caches: Optional[Dict[str, Any]] = None):
         super().__init__(daemon=True, name=name)
         self.kv_caches = kv_caches
         self.tp_rank = tp_rank
@@ -56,9 +63,13 @@ class KVTransferThread(threading.Thread):
         v_caches = []
         for _, kv_caches_tuple in self.kv_caches.items():
             # kv_cache_tuple[0] shape: [num_block, block_size, num_head, hidden_dim]
-            k_cache = kv_caches_tuple[0][block_id:block_id + 1, ]
+            k_cache = kv_caches_tuple[0][
+                block_id:block_id + 1,
+            ]
             k_caches.append(k_cache)
-            v_cache = kv_caches_tuple[1][block_id:block_id + 1, ]
+            v_cache = kv_caches_tuple[1][
+                block_id:block_id + 1,
+            ]
             v_caches.append(v_cache)
         return k_caches, v_caches, block_id
 
@@ -135,10 +146,16 @@ class KVTransferThread(threading.Thread):
 
 class KVCacheStoreSendingThread(KVTransferThread):
 
-    def __init__(self, tp_rank: int, tp_size: int, m_store: Mooncakestore,
+    def __init__(self,
+                 tp_rank: int,
+                 tp_size: int,
+                 m_store: Mooncakestore,
                  local_kv_caches_base_addr: list[int],
-                 token_database: ChunkedTokenDatabase, block_len: list[int],
-                 block_size: int, ready_event: threading.Event, kv_caches: dict[str, torch.Tensor] = None):
+                 token_database: ChunkedTokenDatabase,
+                 block_len: list[int],
+                 block_size: int,
+                 ready_event: threading.Event,
+                 kv_caches: Optional[dict[str, torch.Tensor]] = None):
         super().__init__(tp_rank,
                          tp_size,
                          m_store,
@@ -178,7 +195,8 @@ class KVCacheStoreSendingThread(KVTransferThread):
             blockIds = []
             for start, end, key in self.token_database.process_tokens(
                     tokens, mask):
-                k_cache, v_cache, block_id = self.prepare_tensor(start, block_ids)
+                k_cache, v_cache, block_id = self.prepare_tensor(
+                    start, block_ids)
                 key_list.append(key.to_string())
                 k_caches.append(k_cache)
                 v_caches.append(v_cache)

@@ -20,10 +20,7 @@ from vllm_ascend.distributed.mooncake.config_data import (
 from vllm_ascend.distributed.mooncake.mooncake_engine import MooncakeEngine
 from vllm_ascend.utils import vllm_version_is
 
-if vllm_version_is("0.11.0"):
-    from vllm.utils import make_zmq_socket
-else:
-    from vllm.utils.network_utils import make_zmq_socket
+from vllm.utils import make_zmq_socket
 
 
 class MooncakeConnectorV1(KVConnectorBase_V1):

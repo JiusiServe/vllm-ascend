@@ -11,8 +11,7 @@ HOST_IP = "127.0.0.1"
 MODEL_NAME = "Qwen/Qwen2.5-7B"
 WORKSPACE_DIR = "./tests/e2e/pd_disaggreate/yuanrong/"
 
-RUN_INSTANCES_SCRIPT = os.path.join(WORKSPACE_DIR,
-                                    "run_pd_instance.sh")
+RUN_INSTANCES_SCRIPT = os.path.join(WORKSPACE_DIR, "run_pd_instance.sh")
 RUN_PROXY_SERVER_SCRIPT = os.path.join(WORKSPACE_DIR, "run_proxy_server.sh")
 RUN_YUANRONG_SCRIPT = os.path.join(WORKSPACE_DIR, "run_yuanrong.sh")
 CLEAN_YUANRONG_SCRIPT = os.path.join(WORKSPACE_DIR, "clean_yuanrong.sh")

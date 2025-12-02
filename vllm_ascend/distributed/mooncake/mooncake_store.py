@@ -2,20 +2,19 @@
 import os
 from collections import deque
 from dataclasses import dataclass
-import regex as re
 
+import regex as re
+import torch
 # Third Party
 from mooncake.store import ReplicateConfig  # type: ignore
-import torch
 from vllm.config import VllmConfig
 from vllm.distributed.parallel_state import get_tensor_model_parallel_rank
 from vllm.utils import get_ip, logger
 
 from vllm_ascend.distributed.mooncake.config_data import MooncakeEngineKey
-from vllm_ascend.distributed.mooncake.transfer_engine import get_global_te
 
 from .config_data import MooncakeStoreConfig
-from .tensor_memory_pool import TensorMemoryPool, InsufficientMemoryError
+from .tensor_memory_pool import InsufficientMemoryError, TensorMemoryPool
 
 METADATA_BYTES_LEN = 24
 BASE_PORT = int(os.getenv("VLLM_BASE_PORT", "8790"))
@@ -60,7 +59,8 @@ class Mooncakestore():
             device_ids_list = list(map(int, all_device_ids.split(',')))
         assert len(device_ids_list) > tp_rank
         device_id = device_ids_list[tp_rank]
-        self.config = MooncakeStoreConfig.load_mooncake_store_config(vllm_config)
+        self.config = MooncakeStoreConfig.load_mooncake_store_config(
+            vllm_config)
         self.store = MooncakeDistributedStore()
         if self.config.protocol == "ascend" and not self.config.use_ascend_direct:
             local_hostname = get_ip() + ":" + str(BASE_PORT + int(device_id)) + \
@@ -83,10 +83,12 @@ class Mooncakestore():
             msg = "Initialize mooncake failed."
             logger.error(msg)
             raise RuntimeError(msg)
-        self.tensor_pool = TensorMemoryPool(max_block_size=
-                                            self.config.fast_transfer_buffer_size * DEFAULT_TENSOR_POOL_SIZE)
-        self.store.register_buffer(self.tensor_pool.base_address,
-                                   self.config.fast_transfer_buffer_size * DEFAULT_TENSOR_POOL_SIZE)
+        self.tensor_pool = TensorMemoryPool(
+            max_block_size=self.config.fast_transfer_buffer_size *
+            DEFAULT_TENSOR_POOL_SIZE)
+        self.store.register_buffer(
+            self.tensor_pool.base_address,
+            self.config.fast_transfer_buffer_size * DEFAULT_TENSOR_POOL_SIZE)
         self.fifo_pool_queue: deque[MooncakeTensorPoolMetadata] = deque()
 
         self.replica_config = ReplicateConfig()
@@ -116,7 +118,6 @@ class Mooncakestore():
                   sizes: list[list[int]], block_ids: list[int]):
         try:
             config = ReplicateConfig()
-            config.preferred_segment = self.local_seg
             config.prefer_alloc_in_same_node = True
             res = self.store.batch_put_from_multi_buffers(
                 keys, addrs, sizes, config)
@@ -126,7 +127,9 @@ class Mooncakestore():
         except Exception as e:
             logger.error(f"Failed to put key {keys},error:{e}")
 
-    def get_batch_tcp(self, keys: list[str], k_caches: list[list[torch.Tensor]], v_caches: list[list[torch.Tensor]],
+    def get_batch_tcp(self, keys: list[str],
+                      k_caches: list[list[torch.Tensor]],
+                      v_caches: list[list[torch.Tensor]],
                       block_ids: list[int]):
         if not keys:
             return
@@ -136,22 +139,27 @@ class Mooncakestore():
         device = sample_tensor.device
         buffer_dtype = sample_tensor.dtype
         buffer_shape = sample_tensor.shape
-        block_buffer_size = sample_tensor.numel() * sample_tensor.element_size()
+        block_buffer_size = sample_tensor.numel() * sample_tensor.element_size(
+        )
 
         alloc_func = self._pool_allocate
 
         for k_list in k_caches:
             num_allocs = len(k_list) * 2
-            current_block_addrs = [alloc_func(block_buffer_size) for _ in range(num_allocs)]
+            current_block_addrs = [
+                alloc_func(block_buffer_size) for _ in range(num_allocs)
+            ]
             buffer_addrs.append(current_block_addrs)
             buffer_sizes.append([block_buffer_size] * num_allocs)
         try:
-            read_bytes = self.store.batch_get_into_multi_buffers(keys, buffer_addrs, buffer_sizes, True)
+            read_bytes = self.store.batch_get_into_multi_buffers(
+                keys, buffer_addrs, buffer_sizes, True)
         except Exception as e:
             logger.error("batch_get_into failed: %s", str(e))
             return
 
-        for i, (key, addrs, r_byte) in enumerate(zip(keys, buffer_addrs, read_bytes)):
+        for i, (key, addrs,
+                r_byte) in enumerate(zip(keys, buffer_addrs, read_bytes)):
 
             if r_byte > 0:
                 current_k_list = k_caches[i]
@@ -179,13 +187,16 @@ class Mooncakestore():
                 for addr in addrs:
                     self.tensor_pool.free(addr)
 
-    def put_batch_tcp(self, keys: list[str], k_caches: list[list[torch.Tensor]], v_caches: list[list[torch.Tensor]],
+    def put_batch_tcp(self, keys: list[str],
+                      k_caches: list[list[torch.Tensor]],
+                      v_caches: list[list[torch.Tensor]],
                       block_ids: list[int]):
         if not keys:
             return
 
         sample_tensor = k_caches[0][0]
-        block_buffer_size = sample_tensor.numel() * sample_tensor.element_size()
+        block_buffer_size = sample_tensor.numel() * sample_tensor.element_size(
+        )
 
         buffer_addrs = []
         buffer_sizes = []
@@ -198,8 +209,7 @@ class Mooncakestore():
                 current_block_addrs.append(self._pool_store_tensor(v))
 
             self.fifo_pool_queue.append(
-                MooncakeTensorPoolMetadata(key, current_block_addrs)
-            )
+                MooncakeTensorPoolMetadata(key, current_block_addrs))
 
             buffer_addrs.append(current_block_addrs)
             buffer_sizes.append([block_buffer_size] * len(current_block_addrs))
@@ -245,8 +255,7 @@ class Mooncakestore():
         return ret
 
     def close(self):
-        self.store.unregister_buffer(self.tensor_pool.base_address,
-                                     1)
+        self.store.unregister_buffer(self.tensor_pool.base_address, 1)
         self.tensor_pool.cleanup()
         self.store.close()
         logger.info("Closed the mooncake store connection")

@@ -14,10 +14,8 @@ from vllm.utils import logger
 
 from vllm_ascend.utils import vllm_version_is
 
-if vllm_version_is("0.11.0"):
-    from vllm.utils import cdiv
-else:
-    from vllm.utils.math_utils import cdiv
+from vllm.utils import cdiv
+
 
 from vllm.v1.core.sched.output import NewRequestData
 
@@ -120,8 +118,8 @@ class LayerMooncakeEngineKey(MooncakeEngineKey):
 class ChunkedTokenDatabase():
 
     def __init__(
-            self,
-            metadata: MooncakeEngineMetadata,
+        self,
+        metadata: MooncakeEngineMetadata,
     ):
         self.metadata = metadata
 
@@ -137,9 +135,9 @@ class ChunkedTokenDatabase():
         )
 
     def _hash(
-            self,
-            tokens: Union[torch.Tensor, List[int]],
-            prefix_hash: str,
+        self,
+        tokens: Union[torch.Tensor, List[int]],
+        prefix_hash: str,
     ) -> str:
         # TODO: change it to a more efficient hash function
         if isinstance(tokens, torch.Tensor):
@@ -150,8 +148,8 @@ class ChunkedTokenDatabase():
                               tokens_bytes).hexdigest()
 
     def _chunk_tokens(
-            self,
-            tokens: Union[torch.Tensor, List[int]],
+        self,
+        tokens: Union[torch.Tensor, List[int]],
     ) -> Iterable[Union[torch.Tensor, List[int]]]:
         """
         Chunk the tokens into chunks of size self.metadata.block_size.
@@ -166,8 +164,8 @@ class ChunkedTokenDatabase():
             yield tokens[i:i + self.metadata.block_size]
 
     def _prefix_hash(
-            self,
-            token_chunks: Iterable[Union[torch.Tensor, List[int]]],
+        self,
+        token_chunks: Iterable[Union[torch.Tensor, List[int]]],
     ) -> Iterable[str]:
         prefix_hash = ''
         for token_chunk in token_chunks:
@@ -175,9 +173,9 @@ class ChunkedTokenDatabase():
             yield prefix_hash
 
     def process_tokens(
-            self,
-            tokens: Union[torch.Tensor, List[int]],
-            mask: Optional[torch.Tensor] = None,
+        self,
+        tokens: Union[torch.Tensor, List[int]],
+        mask: Optional[torch.Tensor] = None,
     ) -> Iterable[Tuple[int, int, MooncakeEngineKey]]:
         """Process the tokens and return the corresponding cache engine keys.
 
@@ -260,8 +258,8 @@ class RequestTracker:
 
     @staticmethod
     def from_new_request(
-            new_request: "NewRequestData",
-            num_tokens_to_compute: int,
+        new_request: "NewRequestData",
+        num_tokens_to_compute: int,
     ) -> "RequestTracker":
         """Create the request tracker from a new request.
 
@@ -286,15 +284,15 @@ class RequestTracker:
         return RequestTracker(
             req_id=new_request.req_id,
             token_ids=new_request.prompt_token_ids[:num_tokens_to_compute].
-                copy(),
+            copy(),
             allocated_block_ids=unfolded_block_ids,
             num_saved_tokens=0,
         )
 
     def update(
-            self,
-            new_token_ids: list[int],
-            new_block_ids: Union[tuple[list[int], ...], list[int]],
+        self,
+        new_token_ids: list[int],
+        new_block_ids: Union[tuple[list[int], ...], list[int]],
     ) -> None:
         """Update the request tracker when a running request is
         scheduled again
@@ -333,12 +331,12 @@ class ReqMeta:
 
     @staticmethod
     def from_request_tracker(
-            tracker: RequestTracker,
-            block_size: int,
-            load_spec: Optional[LoadSpec] = None,
-            skip_save: Optional[bool] = False,
-            is_last_chunk: Optional[bool] = None,
-            discard_partial_chunks: bool = True,
+        tracker: RequestTracker,
+        block_size: int,
+        load_spec: Optional[LoadSpec] = None,
+        skip_save: Optional[bool] = False,
+        is_last_chunk: Optional[bool] = None,
+        discard_partial_chunks: bool = True,
     ) -> Optional["ReqMeta"]:
         """Create the request metadata from a request tracker.
 
@@ -447,13 +445,15 @@ class MooncakeStoreConfig:
         return MooncakeStoreConfig.get_mooncake_store_config(config)
 
     @staticmethod
-    def load_mooncake_store_config(vllm_config: VllmConfig) -> "MooncakeStoreConfig":
+    def load_mooncake_store_config(
+            vllm_config: VllmConfig) -> "MooncakeStoreConfig":
         config_path = os.getenv("MOONCAKE_CONFIG_PATH")
         if not config_path:
             logger.debug(
-                "The environment variable 'MOONCAKE_CONFIG_PATH' is not set, use kv connector extra config")
-            return MooncakeStoreConfig.get_mooncake_store_config(vllm_config.kv_transfer_config
-                                                                 .kv_connector_extra_config)
+                "The environment variable 'MOONCAKE_CONFIG_PATH' is not set, use kv connector extra config"
+            )
+            return MooncakeStoreConfig.get_mooncake_store_config(
+                vllm_config.kv_transfer_config.kv_connector_extra_config)
         return MooncakeStoreConfig.from_file(config_path)
 
     @staticmethod
@@ -470,7 +470,8 @@ class MooncakeStoreConfig:
             device_name=config.get("device_name", ""),
             master_server_address=config.get("master_server_address"),
             use_ascend_direct=config.get("use_ascend_direct", False),
-            fast_transfer_buffer_size=config.get("fast_transfer_buffer_size", 1))
+            fast_transfer_buffer_size=config.get("fast_transfer_buffer_size",
+                                                 1))
 
 
 def _parse_global_segment_size(value) -> int:
@@ -503,8 +504,8 @@ def _parse_global_segment_size(value) -> int:
         raise ValueError("global segment size cannot be empty.")
 
     UNIT_MULTIPLIERS = {
-        'gb': 1024 ** 3,  # 1 GB = 1024^3 bytes
-        'mb': 1024 ** 2,  # 1 MB = 1024^2 bytes
+        'gb': 1024**3,  # 1 GB = 1024^3 bytes
+        'mb': 1024**2,  # 1 MB = 1024^2 bytes
         'kb': 1024,  # 1 KB = 1024 bytes
         'b': 1  # 1 B = 1 byte
     }

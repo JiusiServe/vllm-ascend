@@ -18,10 +18,7 @@ from vllm_ascend.distributed.mooncake.kv_transfer import (
 from vllm_ascend.distributed.mooncake.mooncake_store import Mooncakestore
 from vllm_ascend.utils import vllm_version_is
 
-if vllm_version_is("0.11.0"):
-    from vllm.utils import get_kv_cache_torch_dtype
-else:
-    from vllm.utils.torch_utils import get_kv_cache_torch_dtype
+from vllm.utils import get_kv_cache_torch_dtype
 
 
 class MooncakeEngine:
@@ -155,7 +152,8 @@ class MooncakeEngine:
                 self.kv_send_thread = KVCacheStoreSendingThread(
                     self.tp_rank, self.tp_size, self.m_store,
                     self.kv_caches_base_addr, self.token_database,
-                    self.block_len, self.block_size, ready_event_sending, self.kv_caches)
+                    self.block_len, self.block_size, ready_event_sending,
+                    self.kv_caches)
                 self.kv_send_thread.start()
             if self.load_async:
                 ready_event = threading.Event()
@@ -235,12 +233,14 @@ class MooncakeEngine:
                         blockIds = []
                         for start, end, key in self.token_database.process_tokens(
                                 tokens, token_mask):
-                            k_cache, v_cache, block_id = self.prepare_tensor(start, request.block_ids)
+                            k_cache, v_cache, block_id = self.prepare_tensor(
+                                start, request.block_ids)
                             key_list.append(key.to_string())
                             k_caches.append(k_cache)
                             v_caches.append(v_cache)
                             blockIds.append(block_id)
-                        self.m_store.get_batch_tcp(key_list, k_caches, v_caches, blockIds)
+                        self.m_store.get_batch_tcp(key_list, k_caches,
+                                                   v_caches, blockIds)
                     else:
                         for start, end, key in self.token_database.process_tokens(
                                 tokens, token_mask):
@@ -268,9 +268,13 @@ class MooncakeEngine:
         v_caches = []
         for _, kv_caches_tuple in self.kv_caches.items():
             # kv_cache_tuple[0] shape: [num_block, block_size, num_head, hidden_dim]
-            k_cache = kv_caches_tuple[0][block_id:block_id + 1,]
+            k_cache = kv_caches_tuple[0][
+                block_id:block_id + 1,
+            ]
             k_caches.append(k_cache)
-            v_cache = kv_caches_tuple[1][block_id:block_id + 1,]
+            v_cache = kv_caches_tuple[1][
+                block_id:block_id + 1,
+            ]
             v_caches.append(v_cache)
         return k_caches, v_caches, block_id
 
