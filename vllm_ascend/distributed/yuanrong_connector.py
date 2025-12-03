@@ -68,7 +68,7 @@ class RequestTracker:
 
     @staticmethod
     def from_new_request(request_id: str, token_ids: torch.Tensor,
-                         block_ids: List[int],
+                         block_ids: tuple[List[int], ...],
                          num_scheduled_tokens: int) -> "RequestTracker":
         """
         Creates a new RequestTracker instance from a fresh request.
@@ -104,7 +104,7 @@ class ReqMeta:
     """
     request_id: str
     token_ids: numpy.ndarray
-    block_ids: tuple[List[int], ...]
+    block_ids: List[int]
     request_rank: int
     skip_block_num: int
     ds_cached_block_num: int
@@ -165,7 +165,7 @@ class YuanRongConnectorMetadata(KVConnectorMetadata):
     def add_request(self,
                     request_id: str,
                     token_ids: List[int],
-                    block_ids: List[int],
+                    block_ids: tuple[List[int], ...],
                     skip_block_num: int,
                     ds_cached_block_num: int,
                     need_save: bool = True) -> None:
