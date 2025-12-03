@@ -10,13 +10,7 @@ import torch
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.base import \
     KVConnectorMetadata
-from vllm.utils import logger
-
-from vllm_ascend.utils import vllm_version_is
-
-from vllm.utils import cdiv
-
-
+from vllm.utils import cdiv, logger
 from vllm.v1.core.sched.output import NewRequestData
 
 DEFAULT_GLOBAL_SEGMENT_SIZE = 3355443200  # 3.125 GiB

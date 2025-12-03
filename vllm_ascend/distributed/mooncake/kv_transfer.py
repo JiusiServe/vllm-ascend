@@ -23,7 +23,7 @@ class KVTransferThread(threading.Thread):
                  block_size: int,
                  ready_event: threading.Event,
                  name: str,
-                 kv_caches: Optional[Dict[str, Any]] = None):
+                 kv_caches: dict[str, Any] = {}):
         super().__init__(daemon=True, name=name)
         self.kv_caches = kv_caches
         self.tp_rank = tp_rank
@@ -155,7 +155,7 @@ class KVCacheStoreSendingThread(KVTransferThread):
                  block_len: list[int],
                  block_size: int,
                  ready_event: threading.Event,
-                 kv_caches: Optional[dict[str, torch.Tensor]] = None):
+                 kv_caches: dict[str, torch.Tensor] = {}):
         super().__init__(tp_rank,
                          tp_size,
                          m_store,

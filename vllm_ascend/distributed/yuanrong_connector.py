@@ -63,7 +63,7 @@ class RequestTracker:
     """
     request_id: str
     token_ids: torch.Tensor
-    block_ids: List[int]
+    block_ids: tuple[List[int], ...]
     num_scheduled_tokens: int
 
     @staticmethod
@@ -104,15 +104,16 @@ class ReqMeta:
     """
     request_id: str
     token_ids: numpy.ndarray
-    block_ids: List[int]
+    block_ids: tuple[List[int], ...]
     request_rank: int
     skip_block_num: int
     ds_cached_block_num: int
     need_save: bool
 
     @staticmethod
-    def make_meta(request_id: str, token_ids: List[int], block_ids: tuple[List[int], ...],
-                  block_size: int, request_rank: int, skip_block_num: int,
+    def make_meta(request_id: str, token_ids: List[int],
+                  block_ids: tuple[List[int], ...], block_size: int,
+                  request_rank: int, skip_block_num: int,
                   ds_cached_block_num: int, need_save: bool) -> "ReqMeta":
         """
         Factory method to create a ReqMeta instance with aligned block calculations.
