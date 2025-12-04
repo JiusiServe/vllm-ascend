@@ -164,7 +164,7 @@ class MooncakeStoreConnectorV1Scheduler:
         self.use_layerwise = use_layerwise
         self.kv_role = vllm_config.kv_transfer_config.kv_role
         self.consumer_is_to_load = vllm_config.kv_transfer_config.kv_connector_extra_config.get(
-            "consumer_is_to_load", False)
+            "consumer_is_to_load", True)
         self.load_async = vllm_config.kv_transfer_config.kv_connector_extra_config.get(
             "load_async", False)
         # request_id -> (vllm cached tokes, mooncake cached tokens)
