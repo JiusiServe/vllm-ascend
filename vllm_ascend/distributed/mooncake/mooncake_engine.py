@@ -69,7 +69,7 @@ class MooncakeEngine:
 
         self.token_database = ChunkedTokenDatabase(self.metadata)
 
-        self.m_store = Mooncakestore(parallel_config)
+        self.m_store = Mooncakestore(vllm_config)
 
         self.kv_send_thread: Optional[KVTransferThread] = None
         self.kv_recv_thread: Optional[KVTransferThread] = None
@@ -149,7 +149,8 @@ class MooncakeEngine:
                 self.kv_send_thread = KVCacheStoreSendingThread(
                     self.tp_rank, self.tp_size, self.m_store,
                     self.kv_caches_base_addr, self.token_database,
-                    self.block_len, self.block_size, ready_event_sending)
+                    self.block_len, self.block_size, ready_event_sending,
+                    self.kv_caches)
                 self.kv_send_thread.start()
             if self.load_async:
                 ready_event = threading.Event()
@@ -222,6 +223,21 @@ class MooncakeEngine:
                             blockIds.append(block_id)
                         self.m_store.get_batch(key_list, addr_list, size_list,
                                                blockIds)
+                    elif self.m_store.config.protocol == "tcp":
+                        k_caches = []
+                        v_caches = []
+                        key_list = []
+                        blockIds = []
+                        for start, end, key in self.token_database.process_tokens(
+                                tokens, token_mask):
+                            k_cache, v_cache, block_id = self.prepare_tensor(
+                                start, request.block_ids)
+                            key_list.append(key.to_string())
+                            k_caches.append(k_cache)
+                            v_caches.append(v_cache)
+                            blockIds.append(block_id)
+                        self.m_store.get_batch_tcp(key_list, k_caches,
+                                                   v_caches, blockIds)
                     else:
                         for start, end, key in self.token_database.process_tokens(
                                 tokens, token_mask):
@@ -242,6 +258,22 @@ class MooncakeEngine:
             addr_list.append(addr)
             size_list.append(length)
         return addr_list, size_list, block_id
+
+    def prepare_tensor(self, start: int, block_ids: list[int]):
+        block_id = block_ids[start // self.block_size]
+        k_caches = []
+        v_caches = []
+        for _, kv_caches_tuple in self.kv_caches.items():
+            # kv_cache_tuple[0] shape: [num_block, block_size, num_head, hidden_dim]
+            k_cache = kv_caches_tuple[0][
+                block_id:block_id + 1,
+            ]
+            k_caches.append(k_cache)
+            v_cache = kv_caches_tuple[1][
+                block_id:block_id + 1,
+            ]
+            v_caches.append(v_cache)
+        return k_caches, v_caches, block_id
 
     def wait_for_layer_load(self) -> None:
         """MooncakeConnector does not do layerwise saving."""
@@ -373,7 +405,7 @@ class MooncakeEngine:
 
         return: A generator that yields Optional[torch.Tensor]. The tensor will
             be the boolean mask indicating which tokens are retrieved and will
-            only be returned in the last iteration. 
+            only be returned in the last iteration.
         """
 
         if mask is not None:
