@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 import torch
 from vllm.utils import logger
-
+from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm_ascend.distributed.mooncake.config_data import (
     ChunkedTokenDatabase, LasyerMultiBlockReqMeta)
 from vllm_ascend.distributed.mooncake.mooncake_store import Mooncakestore
@@ -90,6 +90,7 @@ class KVTransferThread(threading.Thread):
         block_ids: list[int],
         mask: Optional[torch.Tensor] = None,
         is_last_chunk: Optional[bool] = None,
+        mm_features: Optional[list[MultiModalFeatureSpec]] = None,
     ) -> torch.Tensor:
         req = ({
             "req_id": req_id,
@@ -97,6 +98,7 @@ class KVTransferThread(threading.Thread):
             "block_ids": block_ids,
             "mask": mask,
             "is_last_chunk": is_last_chunk,
+            "mm_features": mm_features
         })
         self.request_queue.put(req)
 
@@ -156,6 +158,7 @@ class KVCacheStoreSendingThread(KVTransferThread):
         block_ids = req_meta["block_ids"]
         req_id = req_meta["req_id"]
         is_last_chunk = req_meta["is_last_chunk"]
+        mm_features = req_meta["mm_features"]
         if self.m_store.config.use_ascend_direct:
             addr_list = []
             size_list = []
@@ -177,8 +180,9 @@ class KVCacheStoreSendingThread(KVTransferThread):
             key_list = []
             blockIds = []
             for start, end, key in self.token_database.process_tokens(
-                    tokens, mask):
-                k_cache, v_cache, block_id = self.prepare_tensor(start, block_ids)
+                    tokens, mask, mm_features):
+                k_cache, v_cache, block_id = self.prepare_tensor(
+                    start, block_ids)
                 key_list.append(key.to_string())
                 k_caches.append(k_cache)
                 v_caches.append(v_cache)

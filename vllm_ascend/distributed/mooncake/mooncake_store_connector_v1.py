@@ -9,7 +9,8 @@ from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole)
 from vllm.forward_context import ForwardContext
-from vllm.utils import logger
+from vllm.utils import logger, make_zmq_socket
+from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.request import Request
@@ -212,9 +213,8 @@ class MooncakeStoreConnectorV1Scheduler:
                 request.prompt_token_ids[:token_block_end])
         else:
             token_ids = torch.tensor(request.prompt_token_ids)
-
-        num_external_hit_tokens = self.client.lookup(token_ids)
-
+        mm_features = request.mm_features
+        num_external_hit_tokens = self.client.lookup(token_ids, mm_features)
         if num_external_hit_tokens == request.num_tokens:
             num_external_hit_tokens -= 1
 
@@ -449,8 +449,8 @@ class MooncakeLookupClient:
             bind=False,
         )
 
-    def lookup(self, token_ids: torch.Tensor) -> int:
-        request = self.encoder.encode(token_ids)
+    def lookup(self, token_ids: torch.Tensor, mm_features: Optional[list[MultiModalFeatureSpec]]) -> int:
+        request = self.encoder.encode_tokens_and_mm(token_ids, mm_features)
         self.socket.send_multipart(request, copy=False)
         resp = self.socket.recv()
         result = int.from_bytes(resp, "big")
@@ -468,7 +468,7 @@ class MooncakeLookupServer:
         vllm_config: "VllmConfig",
         use_layerwise: bool,
     ):
-        self.decoder = MsgpackDecoder(torch.Tensor)
+        self.decoder = MsgpackDecoder()
         self.ctx = zmq.Context()  # type: ignore[attr-defined]
         socket_path = get_zmq_rpc_path_mooncake(vllm_config)
         self.socket = make_zmq_socket(
@@ -484,9 +484,10 @@ class MooncakeLookupServer:
         def process_request():
             while self.running:
                 frames = self.socket.recv_multipart(copy=False)
-                token_ids = self.decoder.decode(frames)
+                token_ids, mm_features = self.decoder.decode_tokens_and_mm(frames)
+
                 result = self.mooncake_engine.lookup_scheduler(
-                    token_ids, use_layerwise)
+                    token_ids, use_layerwise, mm_features)
                 response = result.to_bytes(4, "big")
                 self.socket.send(response)
 
