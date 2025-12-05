@@ -4,12 +4,13 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union, Any
 
 import torch
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.base import \
     KVConnectorMetadata
+from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.utils import cdiv, logger
 from vllm.v1.core.sched.output import NewRequestData
 
@@ -132,14 +133,19 @@ class ChunkedTokenDatabase():
         self,
         tokens: Union[torch.Tensor, List[int]],
         prefix_hash: str,
+        extra_keys: Optional[tuple[Any, ...]]
     ) -> str:
         # TODO: change it to a more efficient hash function
         if isinstance(tokens, torch.Tensor):
             tokens_bytes = tokens.cpu().to(torch.uint32).numpy().tobytes()
         elif isinstance(tokens, list):
             tokens_bytes = array.array("I", tokens).tobytes()
+        if extra_keys is not None:
+            extra_bytes = json.dumps(extra_keys, separators=(',', ':')).encode("utf-8")
+        else:
+            extra_bytes = b""
         return hashlib.sha256(prefix_hash.encode("ascii") +
-                              tokens_bytes).hexdigest()
+                              tokens_bytes + extra_bytes).hexdigest()
 
     def _chunk_tokens(
         self,
@@ -160,16 +166,22 @@ class ChunkedTokenDatabase():
     def _prefix_hash(
         self,
         token_chunks: Iterable[Union[torch.Tensor, List[int]]],
+        mm_features: Optional[list[MultiModalFeatureSpec]] = None,
     ) -> Iterable[str]:
         prefix_hash = ''
-        for token_chunk in token_chunks:
-            prefix_hash = self._hash(token_chunk, prefix_hash)
+        curr_mm_idx = 0
+        for chunk_id, token_chunk in enumerate(token_chunks):
+            start_idx = chunk_id * self.metadata.block_size
+            end_idx = start_idx + len(token_chunk)
+            extra_keys, curr_mm_idx = self._gen_mm_extra_hash_keys(mm_features, start_idx, end_idx, curr_mm_idx)
+            prefix_hash = self._hash(token_chunk, prefix_hash, tuple(extra_keys))
             yield prefix_hash
 
     def process_tokens(
         self,
         tokens: Union[torch.Tensor, List[int]],
         mask: Optional[torch.Tensor] = None,
+        mm_features: Optional[list[MultiModalFeatureSpec]] = None,
     ) -> Iterable[Tuple[int, int, MooncakeEngineKey]]:
         """Process the tokens and return the corresponding cache engine keys.
 
@@ -203,9 +215,8 @@ class ChunkedTokenDatabase():
         total_len = len(tokens)
 
         token_chunks = self._chunk_tokens(tokens)
-        prefix_hashes = self._prefix_hash(token_chunks)
+        prefix_hashes = self._prefix_hash(token_chunks, mm_features)
 
-        start_idx = 0
         for chunk_id, hash_val in enumerate(prefix_hashes):
             start_idx = chunk_id * self.metadata.block_size
             end_idx = min(start_idx + self.metadata.block_size, total_len)
@@ -214,6 +225,67 @@ class ChunkedTokenDatabase():
             else:
                 yield start_idx, end_idx, self._make_key_by_hash(hash_val)
 
+    def _gen_mm_extra_hash_keys(self, mm_features: Optional[list[MultiModalFeatureSpec]], start_token_idx: int,
+                                end_token_idx: int,
+                                start_mm_idx: int) -> tuple[list[Any], int]:
+        """Generate extra keys related to MultiModal request for block hash
+        computation. For multi-modal inputs, the extra keys are
+        (mm_hash, start_offset) that indicate a mm input contained in the
+        block and its starting offset in the block tokens.
+
+        Args:
+            request: The request object.
+            start_token_idx: The start token index of the block.
+            end_token_idx: The end token index of the block.
+            start_mm_idx: The start multi-modal index of the block.
+
+        Returns:
+            A tuple of extra keys and the next multi-modal index.
+        """
+        extra_keys: list[Any] = []
+
+        if not mm_features:
+            return extra_keys, start_mm_idx
+
+        # Note that we assume mm_features are sorted by mm_position.offset.
+        # We do not need to check all mm inputs if the start token index is out of
+        # range. This usually happens in the late prefill phase and decoding phase.
+        last_pos = mm_features[-1].mm_position
+        if last_pos.offset + last_pos.length < start_token_idx:
+            return extra_keys, start_mm_idx
+
+        # Support start_mm_idx == -1 to indicate the last mm input.
+        if start_mm_idx < 0:
+            assert -start_mm_idx <= len(mm_features)
+            start_mm_idx = len(mm_features) + start_mm_idx
+
+        curr_mm_idx = start_mm_idx
+        while mm_features and curr_mm_idx < len(mm_features):
+            mm_feature = mm_features[curr_mm_idx]
+            assert mm_feature.identifier is not None
+            offset = mm_feature.mm_position.offset
+            length = mm_feature.mm_position.length
+            if end_token_idx > offset:
+                if start_token_idx > offset + length:
+                    # This block has passed the current mm input.
+                    curr_mm_idx += 1
+                    continue
+
+                # The block contains the current mm input.
+                extra_keys.append(mm_feature.identifier)
+
+                if end_token_idx >= offset + length:
+                    # If this block contains the end of the current mm input,
+                    # move to the next mm input as this block may also contain
+                    # the next mm input.
+                    curr_mm_idx += 1
+                else:
+                    # Otherwise this block is done with mm inputs.
+                    break
+            else:
+                # This block has not reached the current mm input.
+                break
+        return extra_keys, curr_mm_idx
 
 @dataclass
 class LoadSpec:
@@ -240,6 +312,9 @@ class RequestTracker:
 
     # The token ids that has been scheduled so far
     token_ids: list[int]
+
+    # Multi-modal related
+    mm_features: list[MultiModalFeatureSpec]
 
     # The block ids that has been allocated so far
     # NOTE: allocated blocks could be more than the number of tokens
@@ -279,6 +354,7 @@ class RequestTracker:
             req_id=new_request.req_id,
             token_ids=new_request.prompt_token_ids[:num_tokens_to_compute].
             copy(),
+            mm_features=new_request.mm_features,
             allocated_block_ids=unfolded_block_ids,
             num_saved_tokens=0,
         )
@@ -322,6 +398,8 @@ class ReqMeta:
     load_spec: Optional[LoadSpec] = None
 
     is_last_chunk: Optional[bool] = None
+
+    mm_features: Optional[list[MultiModalFeatureSpec]] = None
 
     @staticmethod
     def from_request_tracker(
@@ -372,6 +450,9 @@ class ReqMeta:
         # OPTIMIZATION: pre-allocate the buffer for token ids and block ids
         token_ids = torch.tensor(input_token_ids)[:num_tokens_to_save]
 
+        # Multi-modal related
+        mm_features = tracker.mm_features
+
         # # For load operation: check whether the request is scheduled to load
         if load_spec is not None and load_spec.can_load:
             logger.debug(
@@ -388,6 +469,7 @@ class ReqMeta:
         return ReqMeta(
             req_id=tracker.req_id,
             token_ids=token_ids,
+            mm_features=mm_features,
             block_ids=tracker.allocated_block_ids,
             save_spec=save_spec,
             load_spec=load_spec,
