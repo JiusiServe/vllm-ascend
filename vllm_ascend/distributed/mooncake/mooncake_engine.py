@@ -7,7 +7,7 @@ from typing import Generator, List, Optional, Union
 # Third Party
 import torch
 from vllm.config import VllmConfig
-from vllm.utils import get_kv_cache_torch_dtype, logger
+from vllm.utils import logger
 from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm_ascend.distributed.mooncake.config_data import (
     ChunkedTokenDatabase, LasyerMultiBlockReqMeta, MooncakeConnectorMetadata,
