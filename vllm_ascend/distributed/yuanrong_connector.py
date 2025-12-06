@@ -40,9 +40,9 @@ if TYPE_CHECKING:
 from datasystem import DsTensorClient, Future
 
 # Configuration Constants
-ENABLE_PREFIX_CACHING = int(os.environ.get("USING_PREFIX_CONNECTOR", 1))
-FUTURE_TIMEOUT = int(os.getenv("FUTURE_TIMEOUT", 10000))
-SYNC_FUTURE_TIMEOUT = int(os.getenv("SYNC_FUTURE_TIMEOUT", 1))
+ENABLE_PREFIX_CACHING = int(os.getenv("USING_PREFIX_CONNECTOR", "1"))
+FUTURE_TIMEOUT = int(os.getenv("FUTURE_TIMEOUT", "10000"))
+SYNC_FUTURE_TIMEOUT = int(os.getenv("SYNC_FUTURE_TIMEOUT", "1"))
 SLEEP_TIMEOUT = 0.005
 
 logger = init_logger(f"vllm.{__name__}")
@@ -93,7 +93,9 @@ class RequestTracker:
             block_ids: New block IDs to append to the existing list.
             num_external_scheduled_tokens: Number of additional tokens scheduled.
         """
-        self.block_ids[0].extend(block_ids[0])
+        if block_ids is not None:
+            self.block_ids[0].extend(block_ids[0])
+
         self.num_scheduled_tokens += num_external_scheduled_tokens
 
 
@@ -125,7 +127,7 @@ class ReqMeta:
             block_size: The size of each KV cache block.
             request_rank: The Tensor Parallel (TP) rank assigned to handle this request.
             skip_block_num: Number of blocks to skip (already computed/loaded).
-            ds_cached_block_num: Number of blocks existing in the data system.
+            ds_cached_block_num: Number of blocks existing in the datasystem.
             need_save: Whether the KV cache for this request needs to be saved.
 
         Returns:
@@ -237,8 +239,7 @@ class AsyncHandler:
                     req_state = self._async_save_reqs[request_id]
 
                     if res == RequestStatus.FINISHED:
-                        logger.info(
-                            f"Request: {request_id} save task finished")
+                        logger.info("Request: %s save task finished", request_id)
                         req_state.num_pending -= 1
                         # If all tasks for this request are done and marked finished
                         if req_state.finished and req_state.num_pending == 0:
@@ -251,14 +252,16 @@ class AsyncHandler:
 
                     else:
                         logger.error(
-                            f"Request: {request_id} save future timeout/failed, result: {res}"
+                            "Request: %s save future timeout/failed, result: %s",
+                            request_id,
+                            res
                         )
                         self._finished_save_reqs.put_nowait(request_id)
                         del self._async_save_reqs[request_id]
 
                 await asyncio.sleep(SLEEP_TIMEOUT)
             except Exception as e:
-                logger.error(f"Failed to process save futures: {e}")
+                logger.error("Failed to process save futures: %s", e)
 
     async def get_load_futures_async(self) -> None:
         """Background loop to monitor and process load futures."""
@@ -271,8 +274,7 @@ class AsyncHandler:
                     req_state = self._async_load_reqs[request_id]
 
                     if res == RequestStatus.FINISHED:
-                        logger.info(
-                            f"Request: {request_id} load task finished")
+                        logger.info("Request: %s load task finished", request_id)
                         req_state.num_pending -= 1
                         if req_state.num_pending == 0:
                             self._finished_load_reqs.put_nowait(request_id)
@@ -282,15 +284,13 @@ class AsyncHandler:
                         self._future_load_list.put_nowait((request_id, future))
 
                     else:
-                        logger.error(
-                            f"Request: {request_id} load future timeout/failed, result: {res}"
-                        )
+                        logger.error("Request: %s load future timeout/failed, result: %s", request_id, res)
                         self._finished_load_reqs.put_nowait(request_id)
                         del self._async_load_reqs[request_id]
 
                 await asyncio.sleep(SLEEP_TIMEOUT)
             except Exception as e:
-                logger.error(f"Failed to process load futures: {e}")
+                logger.error("Failed to process load futures: %s", e)
                 await asyncio.sleep(SLEEP_TIMEOUT)
 
     def add_save_request(self, request: ReqMeta, future_num: int) -> None:
@@ -336,9 +336,7 @@ class AsyncHandler:
             finished_reqs.add(self._finished_save_reqs.get_nowait())
 
         if finished_reqs:
-            logger.debug(
-                f"Finished save requests: {finished_reqs}, count: {len(finished_reqs)}"
-            )
+            logger.debug("Finished save requests: %s, count: %d", finished_reqs, len(finished_reqs))
             return finished_reqs
         return None
 
@@ -354,16 +352,14 @@ class AsyncHandler:
             finished_reqs.add(self._finished_load_reqs.get_nowait())
 
         if finished_reqs:
-            logger.debug(
-                f"Finished load requests: {finished_reqs}, count: {len(finished_reqs)}"
-            )
+            logger.debug("Finished load requests: %s, count: %d", finished_reqs, len(finished_reqs))
             return finished_reqs
         return None
 
 
 class YuanRongConnector(KVConnectorBase_V1):
     """
-    Custom KV Connector implementation for YuanRong data system.
+    Custom KV Connector implementation for YuanRong Datasystem.
     Handles transferring KV cache blocks between vLLM GPU memory and remote storage.
     """
 
@@ -375,11 +371,11 @@ class YuanRongConnector(KVConnectorBase_V1):
         """
         super().__init__(vllm_config=vllm_config, role=role)
 
-        self._block_size = vllm_config.cache_config.block_size
-        self._requests_need_load: Dict[str, Request] = {}
-        self.config = vllm_config.kv_transfer_config
-        self.is_producer = self.config.is_kv_producer
+        self.vllm_config = vllm_config
+        self._block_size = self.vllm_config.cache_config.block_size
+        self.is_producer = self.vllm_config.kv_transfer_config.is_kv_producer
         self.do_async_save = int(os.getenv("ASYNC_SAVE", 1))
+        self._requests_need_load: Dict[str, Request] = {}
 
         # Internal state for layers and caches
         self.layer_name_list: list[str] = []
@@ -406,17 +402,17 @@ class YuanRongConnector(KVConnectorBase_V1):
         self.tp_size = vllm_config.parallel_config.tensor_parallel_size
 
         # DataSystem Connection Configuration
-        ds_worker_addr = os.getenv("DS_WORKER_ADDR", "172.17.0.4:9000")
+        ds_worker_addr = os.getenv("DS_WORKER_ADDR", "127.0.0.1:31501")
         ip, port = split_host_port(ds_worker_addr)
 
-        self.device = get_world_group().local_rank
-        self.tp_rank = 0
+        self.device = self.tp_rank = None
 
         if role == KVConnectorRole.WORKER:
-            self.tp_rank = get_tp_group().rank_in_group
             self.tp_group = get_tp_group()
-            self.kvc_store = DsTensorClient(ip, port, self.device)
-            self.kvc_store.init()
+            self.tp_rank = self.tp_group.rank_in_group
+            self.device = get_world_group().local_rank
+            self.ds_tensor_client = DsTensorClient(ip, port, self.device)
+            self.ds_tensor_client.init()
 
             if self.do_async_save:
                 self.loop = asyncio.get_event_loop()
@@ -437,21 +433,22 @@ class YuanRongConnector(KVConnectorBase_V1):
                 thread.start()
 
         elif ENABLE_PREFIX_CACHING:
-            # Non-worker roles (e.g. scheduler) needing simple connectivity
-            self.kvc_store = DsTensorClient(ip, port, self.device)
-            self.kvc_store.init()
+            # Non-worker roles needing simple connectivity
+            self.device = 0
+            self.ds_tensor_client = DsTensorClient(ip, port, self.device)
+            self.ds_tensor_client.init()
         else:
+            self.device = 0
             self.tp_group = None
 
         logger.info(
-            f"Initialized Datasystem: ip={ip}, port={port}, device_id={self.device}"
-        )
+                "YuanRongConnector initialized successfully. "
+                "IP: %s, Port: %d, Device: %d", ip, port, self.device)
 
     def start_event_loop(self):
         """Starts the async event loop execution."""
         current_thread = threading.current_thread()
-        logger.info(
-            f"Starting async event loop in thread: {current_thread.ident}")
+        logger.info("Starting async event loop in thread: %s", current_thread.ident)
         self.loop.run_until_complete(asyncio.gather(*self.task_list))
         self.loop.close()
 
@@ -465,9 +462,9 @@ class YuanRongConnector(KVConnectorBase_V1):
                     self.do_save_request(request)
                 await asyncio.sleep(SLEEP_TIMEOUT)
             except Exception as e:
-                logger.error(f"producer_request_task failed: {e}")
+                logger.error("producer_request_task failed: %s", e)
                 # Re-queue might be dangerous if error is persistent, considering simple retry logic
-                # self._save_request_queue.put_nowait(request)
+                self._save_request_queue.put_nowait(request)
                 await asyncio.sleep(SLEEP_TIMEOUT)
 
     async def consumer_request_task(self):
@@ -480,7 +477,7 @@ class YuanRongConnector(KVConnectorBase_V1):
                     self.do_load_kv(request)
                 await asyncio.sleep(SLEEP_TIMEOUT)
             except Exception as e:
-                logger.error(f"consumer_request_task failed: {e}")
+                logger.error("consumer_request_task failed: %s", e)
                 self._load_request_queue.put_nowait(request)
                 await asyncio.sleep(SLEEP_TIMEOUT)
 
@@ -541,6 +538,8 @@ class YuanRongConnector(KVConnectorBase_V1):
             if not self.is_producer or ENABLE_PREFIX_CACHING:
                 finished_loaded_req = self._async_handler.get_load_finished()
 
+            logger.debug("Finished saved requests: %s, Finished loaded requests: %s",
+                         finished_saved_req, finished_loaded_req)
             return finished_saved_req, finished_loaded_req
         return None, None
 
@@ -558,9 +557,8 @@ class YuanRongConnector(KVConnectorBase_V1):
         ds_cached_block_num = request.ds_cached_block_num
         skip_block_num = request.skip_block_num
 
-        logger.debug(
-            f"request: {request.request_id}, ds_cached_blocks: {ds_cached_block_num}, "
-            f"skip_blocks: {skip_block_num}")
+        logger.debug("request: %s, ds_cached_blocks: %d, skip_blocks: %d",
+             request.request_id, ds_cached_block_num, skip_block_num)
 
         if ds_cached_block_num == 0:
             return
@@ -577,15 +575,13 @@ class YuanRongConnector(KVConnectorBase_V1):
             value_cache_key_list = [key + "-value" for key in key_list]
 
             if len(key_list) != len(block_id_list):
-                logger.error(
-                    f"mget_tensors_h2d mismatch: req {request.request_id}")
+                logger.error("mget_tensors_h2d mismatch: req %s", request.request_id)
 
-            get_timeout = 10000
-            key_load_future = self.kvc_store.mget_page_attn_blockwise_h2d(
-                key_list, self.key_caches, block_id_list, get_timeout)
-            value_load_future = self.kvc_store.mget_page_attn_blockwise_h2d(
+            key_load_future = self.ds_tensor_client.mget_page_attn_blockwise_h2d(
+                key_list, self.key_caches, block_id_list, FUTURE_TIMEOUT)
+            value_load_future = self.ds_tensor_client.mget_page_attn_blockwise_h2d(
                 value_cache_key_list, self.value_caches, block_id_list,
-                get_timeout)
+                FUTURE_TIMEOUT)
 
             if not self.do_async_save:
                 get_future(key_load_future, SYNC_FUTURE_TIMEOUT)
@@ -595,13 +591,11 @@ class YuanRongConnector(KVConnectorBase_V1):
                 self._async_handler.add_load_future(request, key_load_future)
                 self._async_handler.add_load_future(request, value_load_future)
 
-            logger.debug(
-                f"mget_tensors_h2d (Split KV) success for {request.request_id}"
-            )
+            logger.debug("mget_tensors_h2d (Split KV) success for %s", request.request_id)
             return
 
         # Handle MLA (Unified Cache)
-        future = self.kvc_store.mget_page_attn_blockwise_h2d(
+        future = self.ds_tensor_client.mget_page_attn_blockwise_h2d(
             key_list, self.kv_caches, block_id_list)
         if not self.do_async_save:
             get_future(future, SYNC_FUTURE_TIMEOUT)
@@ -609,8 +603,7 @@ class YuanRongConnector(KVConnectorBase_V1):
             self._async_handler.add_load_request(request, 1)
             self._async_handler.add_load_future(request, future)
 
-        logger.debug(
-            f"mget_tensors_h2d (MLA) success for {request.request_id}")
+        logger.debug("mget_tensors_h2d (MLA) success for %s", request.request_id)
 
     def wait_for_layer_load(self, layer_name: str) -> None:
         """Placeholder: Wait for a specific layer to finish loading."""
@@ -646,7 +639,7 @@ class YuanRongConnector(KVConnectorBase_V1):
         """
         Executes the KV cache save operation (D2H).
         """
-        logger.debug(f"do_save_request: {request}")
+        logger.debug("do_save_request: %s", request)
         if not self.is_producer or not request.need_save:
             return
 
@@ -664,9 +657,9 @@ class YuanRongConnector(KVConnectorBase_V1):
         # Handle Non-MLA
         if not self.is_mla:
             value_cache_key_list = [key + "-value" for key in token_key_list]
-            key_save_future = self.kvc_store.mset_page_attn_blockwise_d2h(
+            key_save_future = self.ds_tensor_client.mset_page_attn_blockwise_d2h(
                 token_key_list, self.key_caches, request.block_ids)
-            value_save_future = self.kvc_store.mset_page_attn_blockwise_d2h(
+            value_save_future = self.ds_tensor_client.mset_page_attn_blockwise_d2h(
                 value_cache_key_list, self.value_caches, request.block_ids)
 
             if not self.do_async_save:
@@ -677,13 +670,11 @@ class YuanRongConnector(KVConnectorBase_V1):
                 self._async_handler.add_save_future(request, key_save_future)
                 self._async_handler.add_save_future(request, value_save_future)
 
-            logger.debug(
-                f"mset_tensors_d2h (Split KV) success for {request.request_id}"
-            )
+            logger.debug("mset_tensors_d2h (Split KV) success for %s", request.request_id)
             return
 
         # Handle MLA
-        future = self.kvc_store.mset_page_attn_blockwise_d2h(
+        future = self.ds_tensor_client.mset_page_attn_blockwise_d2h(
             token_key_list, self.kv_caches, request.block_ids)
         if not self.do_async_save:
             get_future(future, SYNC_FUTURE_TIMEOUT)
@@ -691,8 +682,7 @@ class YuanRongConnector(KVConnectorBase_V1):
             self._async_handler.add_save_request(request, 1)
             self._async_handler.add_save_future(request, future)
 
-        logger.debug(
-            f"mset_tensors_d2h (MLA) success for {request.request_id}")
+        logger.debug("Successfully mset_tensors_d2h (MLA) for %s", request.request_id)
 
     def wait_for_save(self) -> None:
         """
@@ -738,9 +728,8 @@ class YuanRongConnector(KVConnectorBase_V1):
             self._ds_cached_blocks[request.request_id] = prompt_blocks
 
             if self.do_async_save and num_external_computed_tokens > 0:
-                logger.info(
-                    f"req: {request.request_id}, computed: {num_computed_tokens}, "
-                    f"ext_computed: {num_external_computed_tokens}")
+                logger.info("req: %s, computed: %d, ext_computed: %d",
+                            request.request_id, num_computed_tokens, num_external_computed_tokens)
                 return num_external_computed_tokens, True
 
             return num_external_computed_tokens, False
@@ -754,18 +743,14 @@ class YuanRongConnector(KVConnectorBase_V1):
                                         "-0")
 
             if not keys:
-                logger.info(
-                    f"Req: {request.request_id}, HBM hit: {num_computed_tokens}, need load: 0"
-                )
+                logger.info("Req: %s, HBM hit: %d, need load: 0", request.request_id, num_computed_tokens)
                 return 0, False
 
             try:
                 # Check existence in data store; append False as sentinel
-                exists = self.kvc_store.exist(keys) + [False]
+                exists = self.ds_tensor_client.exist(keys) + [False]
             except RuntimeError:
-                logger.info(
-                    f"Req: {request.request_id}, Store check failed, need load: 0"
-                )
+                logger.info("Req: %s, Store check failed, need load: 0", request.request_id)
                 return 0, False
 
             # Find first missing block
@@ -777,9 +762,8 @@ class YuanRongConnector(KVConnectorBase_V1):
                 request.
                 request_id] = num_external_hit_blocks + num_computed_blocks
 
-            logger.info(
-                f"Req: {request.request_id}, HBM hit: {num_computed_tokens}, "
-                f"External hit tokens: {num_external_hit_tokens}")
+            logger.info("Req: %s, HBM hit: %d, External hit tokens: %d",
+                        request.request_id, num_computed_tokens, num_external_hit_tokens)
 
             if self.do_async_save and num_external_hit_tokens > 0:
                 return num_external_hit_tokens, True
@@ -798,7 +782,7 @@ class YuanRongConnector(KVConnectorBase_V1):
         if num_external_tokens > 0:
             block = blocks.get_unhashed_block_ids()
             self._requests_need_load[request.request_id] = (request, [block])
-            logger.debug(f"Added to load queue: {request.request_id}")
+            logger.debug("Added to load queue: %s", request.request_id)
 
     def build_connector_meta(
         self,
@@ -808,9 +792,9 @@ class YuanRongConnector(KVConnectorBase_V1):
         Constructs the metadata required for KV transfer based on the scheduler's output.
         Matches requests needing load/save and handles delayed save logic.
         """
+        logger.debug("SchedulerOutput: %s", scheduler_output)
         meta = YuanRongConnectorMetadata(self.tp_size, self._block_size)
         total_need_load = 0
-
         # Process new requests scheduled in this step
         for new_req in scheduler_output.scheduled_new_reqs:
             if new_req.req_id in self._requests_need_load:
@@ -866,9 +850,7 @@ class YuanRongConnector(KVConnectorBase_V1):
                         if len(request_tracker.token_ids
                                ) <= request_tracker.num_scheduled_tokens:
                             del self._delay_save[req_id]
-                            logger.debug(
-                                f"Processing delayed save for: {request_tracker.request_id}"
-                            )
+                            logger.debug("Processing request %s", request_tracker.request_id)
                             meta.add_request(
                                 request_id=request_tracker.request_id,
                                 token_ids=request_tracker.token_ids,
@@ -884,9 +866,7 @@ class YuanRongConnector(KVConnectorBase_V1):
                 # Reconstruct token ID list for prompt
                 token_ids = request.all_token_ids[:len(request.prompt_token_ids
                                                        )]
-                logger.debug(
-                    f"Request {request.request_id} resumed from preemption")
-
+                logger.debug("Processing delayed save for: %s", request_tracker.request_id)
                 meta.add_request(
                     request_id=req_id,
                     token_ids=token_ids,
@@ -899,7 +879,7 @@ class YuanRongConnector(KVConnectorBase_V1):
         if self.do_async_save:
             for req_id, (req, block_ids) in self._requests_need_load.items():
                 if not block_ids:
-                    logger.debug(f"Skipping empty block load for {req_id}")
+                    logger.debug("Skipping empty block load for %s", req_id)
                     continue
 
                 meta.add_request(
@@ -911,12 +891,13 @@ class YuanRongConnector(KVConnectorBase_V1):
                     need_save=False)
                 total_need_load += 1
 
-        logger.debug(f"Build Meta: total_need_load={total_need_load}, "
-                     f"pending={len(self._requests_need_load)}")
-
+        logger.debug("Build Meta: total_need_load=%s, pending=%s",
+                     total_need_load, len(self._requests_need_load))
         if total_need_load != len(self._requests_need_load):
             logger.error(
-                f"Mismatch: need_load={total_need_load} vs pending={len(self._requests_need_load)}"
+                "Mismatch: need_load=%s vs pending=%s",
+                total_need_load,
+                len(self._requests_need_load)
             )
             raise ValueError("Internal state mismatch in load requests")
 
@@ -932,6 +913,11 @@ class YuanRongConnector(KVConnectorBase_V1):
         Callback when a request finishes. 
         Returns True if saving might be continuing asynchronously.
         """
+        logger.debug(
+            "Request finished: request=%s, block_ids=%s",
+            request,
+            block_ids
+        )
         if self.is_producer:
             return bool(self.do_async_save), None
         return False, None
@@ -946,6 +932,10 @@ class YuanRongConnector(KVConnectorBase_V1):
 
         for layer_name, attn_layer in forward_context.no_compile_layers.items(
         ):
+            # Linear layers do not have KV Cache (only Attention layers do)
+            if not hasattr(attn_layer, 'kv_cache'):
+                continue
+
             kv_layer = attn_layer.kv_cache[forward_context.virtual_engine]
 
             # Determine Backend Type
@@ -958,7 +948,7 @@ class YuanRongConnector(KVConnectorBase_V1):
 
             if layer_name not in self.layer_name_list:
                 self.layer_name_list.append(layer_name)
-                logger.debug(f"Init cache for layer: {layer_name}")
+                logger.debug("Init cache for layer: %s", layer_name)
 
                 if not self.is_mla:
                     self.key_caches.append(kv_layer[0])
@@ -1028,7 +1018,7 @@ def get_future(fut: Future, timeout: int = FUTURE_TIMEOUT) -> RequestStatus:
         return RequestStatus.WAITING
 
     if len(failed_list) != 0:
-        logger.error(f"Future returned failures: {failed_list}")
+        logger.error("Future returned failures: %s" % failed_list)
         return RequestStatus.TIMEOUT
 
     return RequestStatus.FINISHED
