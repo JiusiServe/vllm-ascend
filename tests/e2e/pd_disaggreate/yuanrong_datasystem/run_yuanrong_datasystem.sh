@@ -8,8 +8,8 @@ MASTER_PORT=`expr ${WORKER_PORT} + 1`
 ETCD_PEER_PORT=`expr ${ETCD_PORT} + 1`
 
 etcd \
-    --name etcd-yuanrong \
-    --data-dir /tmp/etcd-yuanrong \
+    --name etcd-yuanrong-datasystem \
+    --data-dir /tmp/etcd-yuanrong-datasystem \
     --listen-client-urls http://${HOST_IP}:${ETCD_PORT} \
     --advertise-client-urls http://${HOST_IP}:${ETCD_PORT} \
     --listen-peer-urls http://${HOST_IP}:${ETCD_PEER_PORT} \
