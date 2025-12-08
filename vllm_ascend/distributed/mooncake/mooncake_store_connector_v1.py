@@ -209,6 +209,9 @@ class MooncakeStoreConnectorV1Scheduler:
             token_ids = torch.tensor(request.prompt_token_ids)
         mm_features = request.mm_features
         num_external_hit_tokens = self.client.lookup(token_ids, mm_features)
+        if self.kv_role == "kv_consumer" and self.load_async:
+            # consumer will load kvc of all token ids
+            num_external_hit_tokens = token_block_end
         if num_external_hit_tokens == request.num_tokens:
             num_external_hit_tokens -= 1
 
