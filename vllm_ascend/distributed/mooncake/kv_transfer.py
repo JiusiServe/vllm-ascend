@@ -220,10 +220,15 @@ class KVCacheStoreSendingThread(KVTransferThread):
 
 class KVCacheStoreRecvingThread(KVTransferThread):
 
-    def __init__(self, tp_rank: int, tp_size: int, m_store: Mooncakestore,
+    def __init__(self,
+                 tp_rank: int,
+                 tp_size: int,
+                 m_store: Mooncakestore,
                  local_kv_caches_base_addr: list[int],
-                 token_database: ChunkedTokenDatabase, block_len: list[int],
-                 block_size: int, ready_event: threading.Event,
+                 token_database: ChunkedTokenDatabase,
+                 block_len: list[int],
+                 block_size: int,
+                 ready_event: threading.Event,
                  kv_caches: dict[str, torch.Tensor] = {}):
         super().__init__(tp_rank,
                          tp_size,
@@ -269,7 +274,7 @@ class KVCacheStoreRecvingThread(KVTransferThread):
                 k_caches.append(k_cache)
                 v_caches.append(v_cache)
                 blockIds.append(block_id)
-            self.m_store.get_batch_tcp(key_list, k_caches,v_caches, blockIds)
+            self.m_store.get_batch_tcp(key_list, k_caches, v_caches, blockIds)
         else:
             for start, end, key in self.token_database.process_tokens(
                     tokens, mask):

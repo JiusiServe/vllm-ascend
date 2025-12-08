@@ -158,7 +158,8 @@ class MooncakeEngine:
                 self.kv_recv_thread = KVCacheStoreRecvingThread(
                     self.tp_rank, self.tp_size, self.m_store,
                     self.kv_caches_base_addr, self.token_database,
-                    self.block_len, self.block_size, ready_event, self.kv_caches)
+                    self.block_len, self.block_size, ready_event,
+                    self.kv_caches)
                 self.kv_recv_thread.start()
                 ready_event.wait()
 
