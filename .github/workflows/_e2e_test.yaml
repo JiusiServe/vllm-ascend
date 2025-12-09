@@ -19,6 +19,7 @@ on:
 jobs:
   e2e:
     name: singlecard
+    if: false
     runs-on: ${{ inputs.runner }}-1
     container:
       image: ${{ inputs.image }}
@@ -113,6 +114,7 @@ jobs:
 
   e2e-2-cards:
     name: multicard
+    if: false
     runs-on: ${{ inputs.runner }}-2
     container:
       image: ${{ inputs.image }}

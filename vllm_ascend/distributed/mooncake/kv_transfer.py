@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 import torch
+from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.utils import logger
 
 from vllm_ascend.distributed.mooncake.config_data import (
@@ -101,6 +102,7 @@ class KVTransferThread(threading.Thread):
         block_ids: list[int],
         mask: Optional[torch.Tensor] = None,
         is_last_chunk: Optional[bool] = None,
+        mm_features: Optional[list[MultiModalFeatureSpec]] = None,
     ) -> torch.Tensor:
         req = ({
             "req_id": req_id,
@@ -108,6 +110,7 @@ class KVTransferThread(threading.Thread):
             "block_ids": block_ids,
             "mask": mask,
             "is_last_chunk": is_last_chunk,
+            "mm_features": mm_features
         })
         self.request_queue.put(req)
 
@@ -173,6 +176,7 @@ class KVCacheStoreSendingThread(KVTransferThread):
         block_ids = req_meta["block_ids"]
         req_id = req_meta["req_id"]
         is_last_chunk = req_meta["is_last_chunk"]
+        mm_features = req_meta["mm_features"]
         if self.m_store.config.use_ascend_direct:
             addr_list = []
             size_list = []
@@ -194,7 +198,7 @@ class KVCacheStoreSendingThread(KVTransferThread):
             key_list = []
             blockIds = []
             for start, end, key in self.token_database.process_tokens(
-                    tokens, mask):
+                    tokens, mask, mm_features):
                 k_cache, v_cache, block_id = self.prepare_tensor(
                     start, block_ids)
                 key_list.append(key.to_string())
@@ -216,10 +220,16 @@ class KVCacheStoreSendingThread(KVTransferThread):
 
 class KVCacheStoreRecvingThread(KVTransferThread):
 
-    def __init__(self, tp_rank: int, tp_size: int, m_store: Mooncakestore,
+    def __init__(self,
+                 tp_rank: int,
+                 tp_size: int,
+                 m_store: Mooncakestore,
                  local_kv_caches_base_addr: list[int],
-                 token_database: ChunkedTokenDatabase, block_len: list[int],
-                 block_size: int, ready_event: threading.Event):
+                 token_database: ChunkedTokenDatabase,
+                 block_len: list[int],
+                 block_size: int,
+                 ready_event: threading.Event,
+                 kv_caches: dict[str, torch.Tensor] = {}):
         super().__init__(tp_rank,
                          tp_size,
                          m_store,
@@ -228,13 +238,15 @@ class KVCacheStoreRecvingThread(KVTransferThread):
                          block_len,
                          block_size,
                          ready_event,
-                         name="KVCacheStoreRecvingThread")
+                         name="KVCacheStoreRecvingThread",
+                         kv_caches=kv_caches)
 
     def _handle_request(self, req_meta: dict[str, Any]):
         tokens = req_meta["tokens"]
         mask = req_meta["mask"]
         block_ids = req_meta["block_ids"]
         req_id = req_meta["req_id"]
+        mm_features = req_meta["mm_features"]
         if self.m_store.config.use_ascend_direct:
             addr_list = []
             size_list = []
@@ -250,19 +262,19 @@ class KVCacheStoreRecvingThread(KVTransferThread):
                 blockIds.append(block_id)
             self.m_store.get_batch(key_list, addr_list, size_list, blockIds)
         elif self.m_store.config.protocol == "tcp":
-            addr_list = []
-            size_list = []
+            k_caches = []
+            v_caches = []
             key_list = []
             blockIds = []
             for start, end, key in self.token_database.process_tokens(
-                    tokens, mask):
-                addr, size, block_id = self.prepare_value(
-                    start, end, block_ids)
+                    tokens, mask, mm_features):
+                k_cache, v_cache, block_id = self.prepare_tensor(
+                    start, block_ids)
                 key_list.append(key.to_string())
-                addr_list.append(addr)
-                size_list.append(size)
+                k_caches.append(k_cache)
+                v_caches.append(v_cache)
                 blockIds.append(block_id)
-            self.m_store.get_batch(key_list, addr_list, size_list, blockIds)
+            self.m_store.get_batch_tcp(key_list, k_caches, v_caches, blockIds)
         else:
             for start, end, key in self.token_database.process_tokens(
                     tokens, mask):
