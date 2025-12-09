@@ -7,6 +7,7 @@ from typing import Generator, List, Optional, Union
 # Third Party
 import torch
 from vllm.config import VllmConfig
+from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.utils import get_kv_cache_torch_dtype, logger
 
 from vllm_ascend.distributed.mooncake.config_data import (
@@ -157,7 +158,8 @@ class MooncakeEngine:
                 self.kv_recv_thread = KVCacheStoreRecvingThread(
                     self.tp_rank, self.tp_size, self.m_store,
                     self.kv_caches_base_addr, self.token_database,
-                    self.block_len, self.block_size, ready_event)
+                    self.block_len, self.block_size, ready_event,
+                    self.kv_caches)
                 self.kv_recv_thread.start()
                 ready_event.wait()
 
@@ -179,6 +181,7 @@ class MooncakeEngine:
             if load_spec is None or not load_spec.can_load:  #load =0
                 continue
             tokens = request.token_ids
+            mm_features = request.mm_features
             req_id = request.req_id
             if (load_spec.mooncake_cached_tokens % self.block_size
                     != 0) and (load_spec.mooncake_cached_tokens
@@ -206,6 +209,8 @@ class MooncakeEngine:
                         tokens,
                         request.block_ids,
                         token_mask,
+                        None,
+                        mm_features,
                     )
                 else:
                     if self.m_store.config.use_ascend_direct:
@@ -229,7 +234,7 @@ class MooncakeEngine:
                         key_list = []
                         blockIds = []
                         for start, end, key in self.token_database.process_tokens(
-                                tokens, token_mask):
+                                tokens, token_mask, mm_features):
                             k_cache, v_cache, block_id = self.prepare_tensor(
                                 start, request.block_ids)
                             key_list.append(key.to_string())
@@ -347,12 +352,13 @@ class MooncakeEngine:
                 continue
 
             token_ids = request.token_ids
+            mm_features = request.mm_features
             req_id = request.req_id
             assert isinstance(token_ids, torch.Tensor)
             assert token_ids.is_cpu
 
             skip_leading_tokens = max(
-                self.lookup(token_ids, self.use_layerwise),
+                self.lookup(token_ids, self.use_layerwise, mm_features),
                 save_spec.skip_leading_tokens,
             )
             if skip_leading_tokens == len(token_ids):
@@ -382,6 +388,7 @@ class MooncakeEngine:
                 request.block_ids,
                 store_mask,
                 request.is_last_chunk,
+                mm_features,
             )
 
     def retrieve_layer(
@@ -539,6 +546,7 @@ class MooncakeEngine:
         self,
         tokens: Union[torch.Tensor, List[int]],
         use_layerwise: bool,
+        mm_features: Optional[list[MultiModalFeatureSpec]] = None,
     ) -> int:
         """
         Checks the existence of KV cache of the tokens from the cache engine.
@@ -568,7 +576,7 @@ class MooncakeEngine:
             else:
                 starts = []
                 for start, end, key in self.token_database.process_tokens(
-                        tokens):
+                        tokens, None, mm_features):
                     keys.append(key.to_string())
                     starts.append(start)
                 res = self.m_store.batch_exists(
@@ -586,6 +594,7 @@ class MooncakeEngine:
         self,
         tokens: Union[torch.Tensor, List[int]],
         use_layerwise: bool,
+        mm_features: Optional[list[MultiModalFeatureSpec]],
     ) -> int:
         """
         Checks the existence of KV cache of the tokens from the cache engine.
@@ -615,7 +624,7 @@ class MooncakeEngine:
             else:
                 starts = []
                 for start, end, key in self.token_database.process_tokens(
-                        tokens):
+                        tokens, None, mm_features):
                     keys.append(key.to_string())
                     starts.append(start)
                 multi_tp_keys = keys[:]
