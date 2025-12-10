@@ -22,7 +22,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set,
-                    Tuple, cast)
+                    Tuple, Union, cast)
 
 import numpy
 import torch
@@ -1154,7 +1154,7 @@ class YuanRongConnector(KVConnectorBase_V1):
         self,
         meta: YuanRongConnectorMetadata,
         request_id: str,
-        token_ids: Iterable[int] | numpy.ndarray,
+        token_ids: Union[Iterable[int], numpy.ndarray[Any, Any]],
         block_ids: tuple[List[int], ...],
         mm_features: Optional[list[MultiModalFeatureSpec]] = None,
         need_save: bool = True,
@@ -1162,7 +1162,7 @@ class YuanRongConnector(KVConnectorBase_V1):
         """Common helper to add a request to metadata with tracking pops."""
         skip_block_num = self._skip_blocks.pop(request_id, 0)
         ds_cached_block_num = self._ds_cached_blocks.pop(request_id, 0)
-        token_id_list = list(token_ids)
+        token_id_list = [int(token_id) for token_id in token_ids]
         meta.add_request(
             request_id=request_id,
             token_ids=token_id_list,
