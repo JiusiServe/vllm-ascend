@@ -8,7 +8,6 @@ from datasets import load_dataset
 from vllm import SamplingParams
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.engine.arg_utils import AsyncEngineArgs
-# from vllm_ascend.core.ewsjf_scheduler.scheduler_cls import SCHEDULER_CLS
 
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "2, 3"
