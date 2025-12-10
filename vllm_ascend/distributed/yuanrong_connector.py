@@ -311,7 +311,8 @@ class AsyncHandler:
         """Update save request state based on a future's result."""
         req_state = self._async_save_reqs.get(request_id)
         if req_state is None:
-            logger.warning("Req: %s, save state missing for future", request_id)
+            logger.warning("Req: %s, save state missing for future",
+                           request_id)
             return
 
         res = get_future(future)
@@ -357,7 +358,8 @@ class AsyncHandler:
         """Update load request state based on a future's result."""
         req_state = self._async_load_reqs.get(request_id)
         if req_state is None:
-            logger.warning("Req: %s, load state missing for future", request_id)
+            logger.warning("Req: %s, load state missing for future",
+                           request_id)
             return
 
         res = get_future(future)
@@ -491,7 +493,7 @@ class YuanRongConnector(KVConnectorBase_V1):
 
         # Mapping of requests needing load: request_id -> (Request object, block IDs)
         self._requests_need_load: Dict[str, tuple[Request, tuple[list[int],
-                                                                ...]]] = {}
+                                                                 ...]]] = {}
 
         # Model layer and cache management
         self._layer_name_list: list[str] = []
@@ -529,7 +531,7 @@ class YuanRongConnector(KVConnectorBase_V1):
             if self._do_async_save:
                 self._loop = asyncio.get_event_loop()
                 self._async_handler = AsyncHandler(self._is_producer,
-                                                  self._task_list)
+                                                   self._task_list)
                 # Register async processing tasks
                 if ENABLE_PREFIX_CACHING or not self._is_producer:
                     self._task_list.append(
@@ -1032,8 +1034,7 @@ class YuanRongConnector(KVConnectorBase_V1):
         total_need_load = 0
 
         total_need_load += self._handle_new_requests(scheduler_output, meta)
-        total_need_load += self._handle_cached_requests(scheduler_output,
-                                                        meta)
+        total_need_load += self._handle_cached_requests(scheduler_output, meta)
         total_need_load += self._handle_pending_async_loads(meta)
 
         logger.debug("Build Meta: total_need_load=%s, pending=%s",
@@ -1047,7 +1048,7 @@ class YuanRongConnector(KVConnectorBase_V1):
         return meta
 
     def _handle_new_requests(self, scheduler_output: SchedulerOutput,
-                              meta: YuanRongConnectorMetadata) -> int:
+                             meta: YuanRongConnectorMetadata) -> int:
         """Handle metadata construction for newly scheduled requests."""
         total_need_load = 0
         for new_req in scheduler_output.scheduled_new_reqs:
@@ -1070,9 +1071,10 @@ class YuanRongConnector(KVConnectorBase_V1):
 
             # Track for delayed save if not all tokens are scheduled
             if len(new_req.prompt_token_ids) > num_scheduled_tokens:
-                self._delay_save[new_req.req_id] = RequestTracker.from_new_request(
-                    new_req.req_id, new_req.prompt_token_ids, block_ids,
-                    num_scheduled_tokens, mm_features)
+                self._delay_save[
+                    new_req.req_id] = RequestTracker.from_new_request(
+                        new_req.req_id, new_req.prompt_token_ids, block_ids,
+                        num_scheduled_tokens, mm_features)
                 continue
 
             self._add_request_to_meta(meta, new_req.req_id,
@@ -1096,9 +1098,8 @@ class YuanRongConnector(KVConnectorBase_V1):
                 num_external_scheduled_tokens = scheduler_output.num_scheduled_tokens.get(
                     req_id, 0)
                 if request_tracker is not None:
-                    request_tracker.update(
-                        self._to_block_tuple(new_block_ids),
-                        num_external_scheduled_tokens)
+                    request_tracker.update(self._to_block_tuple(new_block_ids),
+                                           num_external_scheduled_tokens)
                     # Move to save queue if all tokens are scheduled
                     if len(request_tracker.token_ids
                            ) <= request_tracker.num_scheduled_tokens:
@@ -1106,12 +1107,11 @@ class YuanRongConnector(KVConnectorBase_V1):
                         logger.debug(
                             "Req: %s, Processing load for delayed save request",
                             request_tracker.request_id)
-                        self._add_request_to_meta(
-                            meta,
-                            request_tracker.request_id,
-                            request_tracker.token_ids,
-                            request_tracker.block_ids,
-                            request_tracker.mm_features)
+                        self._add_request_to_meta(meta,
+                                                  request_tracker.request_id,
+                                                  request_tracker.token_ids,
+                                                  request_tracker.block_ids,
+                                                  request_tracker.mm_features)
 
             # Handle resumed requests needing load
             if req_id in self._requests_need_load:
@@ -1119,18 +1119,16 @@ class YuanRongConnector(KVConnectorBase_V1):
                 mm_features = self._get_mm_features(request)
                 logger.debug("Req: %s, Processing load for resumed request",
                              req_id)
-                self._add_request_to_meta(
-                    meta,
-                    req_id,
-                    request.prompt_token_ids,
-                    self._to_block_tuple(new_block_ids),
-                    mm_features)
+                self._add_request_to_meta(meta, req_id,
+                                          request.prompt_token_ids,
+                                          self._to_block_tuple(new_block_ids),
+                                          mm_features)
                 total_need_load += 1
 
         return total_need_load
 
-    def _handle_pending_async_loads(
-        self, meta: YuanRongConnectorMetadata) -> int:
+    def _handle_pending_async_loads(self,
+                                    meta: YuanRongConnectorMetadata) -> int:
         """Handle pending async load requests when async save is enabled."""
         total_need_load = 0
         if not self._do_async_save:
@@ -1142,13 +1140,12 @@ class YuanRongConnector(KVConnectorBase_V1):
                              req_id)
                 continue
 
-            self._add_request_to_meta(
-                meta,
-                req_id,
-                req.prompt_token_ids,
-                block_ids,
-                self._get_mm_features(req),
-                need_save=False)
+            self._add_request_to_meta(meta,
+                                      req_id,
+                                      req.prompt_token_ids,
+                                      block_ids,
+                                      self._get_mm_features(req),
+                                      need_save=False)
             total_need_load += 1
 
         return total_need_load
@@ -1165,9 +1162,10 @@ class YuanRongConnector(KVConnectorBase_V1):
         """Common helper to add a request to metadata with tracking pops."""
         skip_block_num = self._skip_blocks.pop(request_id, 0)
         ds_cached_block_num = self._ds_cached_blocks.pop(request_id, 0)
+        token_id_list = list(token_ids)
         meta.add_request(
             request_id=request_id,
-            token_ids=token_ids,
+            token_ids=token_id_list,
             block_ids=block_ids,
             skip_block_num=skip_block_num,
             ds_cached_block_num=ds_cached_block_num,
@@ -1176,7 +1174,8 @@ class YuanRongConnector(KVConnectorBase_V1):
         )
 
     @staticmethod
-    def _get_mm_features(request: Any) -> Optional[list[MultiModalFeatureSpec]]:
+    def _get_mm_features(
+            request: Any) -> Optional[list[MultiModalFeatureSpec]]:
         """Extract multimodal features from request-like objects."""
         return request.mm_features if hasattr(request, "mm_features") else None
 
