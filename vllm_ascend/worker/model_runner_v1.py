@@ -33,10 +33,8 @@ from typing import (TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional,
                     Union, cast)
 
 import numpy as np
-from numpy import ndarray, dtype
 import numpy.typing as npt
 import torch
-from torch import Tensor
 import torch._dynamo.cache_size
 import torch.distributed as dist
 import torch.nn as nn
@@ -91,9 +89,8 @@ from vllm.v1.kv_cache_interface import (AttentionSpec,
                                         UniformTypeKVCacheSpecs)
 # yapf: enable
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
-                             DraftTokenIds, ECConnectorOutput,
-                             LogprobsTensors, ModelRunnerOutput,
-                             PoolerOutput,
+                             DraftTokenIds, ECConnectorOutput, LogprobsTensors,
+                             ModelRunnerOutput, PoolerOutput,
                              make_empty_encoder_model_runner_output)
 from vllm.v1.pool.metadata import PoolingMetadata
 from vllm.v1.sample.metadata import SamplingMetadata
@@ -1021,7 +1018,8 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 is_embed=pos_info.is_embed,
             )
         for req_id, mm_hashes in self.req_id_to_mm_hash.items():
-            self.maybe_save_ec_to_connector(self.encoder_cache, list(mm_hashes), req_id)
+            self.maybe_save_ec_to_connector(self.encoder_cache,
+                                            list(mm_hashes), req_id)
 
         self.maybe_wait_for_ec_save()
 
@@ -1602,7 +1600,8 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 num_input_tokens, num_tokens_across_dp,
                 maybe_padded_num_tokens, logits_indices, spec_decode_metadata,
                 input_ids, inputs_embeds, intermediate_tensors,
-                max_num_scheduled_tokens, ec_finished_sending, ec_finished_recving)
+                max_num_scheduled_tokens, ec_finished_sending,
+                ec_finished_recving)
 
     def _generate_process_reqs_hidden_states(self, attn_metadata, with_prefill,
                                              maybe_padded_num_tokens,
@@ -1972,7 +1971,8 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                     )
                     # Return empty ModelRunnerOuptut if there's no work to do.
                     return EMPTY_MODEL_RUNNER_OUTPUT
-                return self.kv_connector_no_forward(scheduler_output, self.encoder_cache)
+                return self.kv_connector_no_forward(scheduler_output,
+                                                    self.encoder_cache)
 
             if self.dynamic_eplb:
                 self.eplb_updator.forward_before()
@@ -1980,9 +1980,9 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             (attn_metadata, positions, num_scheduled_tokens_np,
              num_input_tokens, num_tokens_across_dp, maybe_padded_num_tokens,
              logits_indices, spec_decode_metadata, input_ids, inputs_embeds,
-             intermediate_tensors,
-             max_query_len, ec_finished_sending, ec_finished_recving) = (self._prepare_inputs(scheduler_output,
-                                                    intermediate_tensors))
+             intermediate_tensors, max_query_len, ec_finished_sending,
+             ec_finished_recving) = (self._prepare_inputs(
+                scheduler_output, intermediate_tensors))
 
             if self.dynamic_eplb:
                 self.eplb_updator.take_update_info_from_eplb_process()
@@ -2015,7 +2015,8 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                     prefetch_stream=self.prefetch_stream,
                     model_instance=self.model,
                     weight_prefetch_method=self.weight_prefetch_method):
-                self.maybe_setup_kv_connector(scheduler_output, self.encoder_cache)
+                self.maybe_setup_kv_connector(scheduler_output,
+                                              self.encoder_cache)
 
                 hidden_states = self._generate_process_reqs_hidden_states(
                     attn_metadata, self.with_prefill, maybe_padded_num_tokens,
@@ -2061,7 +2062,8 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                         hidden_states,
                         scheduler_output.total_num_scheduled_tokens,
                         num_scheduled_tokens_np, finished_sending,
-                        finished_recving, kv_connector_output, ec_connector_output)
+                        finished_recving, kv_connector_output,
+                        ec_connector_output)
                 sample_hidden_states = hidden_states[logits_indices]
                 logits = self.model.compute_logits(sample_hidden_states)
             if broadcast_pp_output:
@@ -2233,7 +2235,10 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             if has_kv_transfer_group():
                 get_kv_transfer_group().clear_connector_metadata()
 
-        extra_args = ({"kv_connector_output": kv_connector_output, "ec_connector_output":ec_connector_output})
+        extra_args = ({
+            "kv_connector_output": kv_connector_output,
+            "ec_connector_output":ec_connector_output
+        })
 
         model_runner_output = ModelRunnerOutput(
             req_ids=req_ids_output_copy,
@@ -2278,7 +2283,8 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         return DraftTokenIds(req_ids, draft_token_ids)
 
     def kv_connector_no_forward(
-            self, scheduler_output: "SchedulerOutput", encoder_cache: dict[str, torch.Tensor]) -> ModelRunnerOutput:
+            self, scheduler_output: "SchedulerOutput",
+            encoder_cache: dict[str, torch.Tensor]) -> ModelRunnerOutput:
         with set_ascend_forward_context(None, self.vllm_config):
             self.maybe_setup_kv_connector(scheduler_output, encoder_cache)
             finished_sending, finished_recving = (
@@ -2304,7 +2310,8 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         return output
 
     @staticmethod
-    def maybe_setup_kv_connector(scheduler_output: "SchedulerOutput", encoder_cache: dict[str, torch.Tensor]):
+    def maybe_setup_kv_connector(scheduler_output: "SchedulerOutput",
+                                 encoder_cache: dict[str, torch.Tensor]):
         # Update KVConnector with the KVConnector metadata forward().
         if has_kv_transfer_group():
             kv_connector = get_kv_transfer_group()
