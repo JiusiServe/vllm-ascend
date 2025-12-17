@@ -1982,7 +1982,7 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
              logits_indices, spec_decode_metadata, input_ids, inputs_embeds,
              intermediate_tensors, max_query_len, ec_finished_sending,
              ec_finished_recving) = (self._prepare_inputs(
-                scheduler_output, intermediate_tensors))
+                 scheduler_output, intermediate_tensors))
 
             if self.dynamic_eplb:
                 self.eplb_updator.take_update_info_from_eplb_process()
@@ -2237,7 +2237,7 @@ class NPUModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
 
         extra_args = ({
             "kv_connector_output": kv_connector_output,
-            "ec_connector_output":ec_connector_output
+            "ec_connector_output": ec_connector_output
         })
 
         model_runner_output = ModelRunnerOutput(
