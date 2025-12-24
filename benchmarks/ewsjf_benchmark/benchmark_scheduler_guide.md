@@ -34,7 +34,7 @@ The benchmark also measures key performance metrics to facilitate this compariso
 ## Install dependencies
 
 ```bash
-pip install vllm datasets pandas
+pip install vllm datasets sortedcontainers
 ```
 
 ## Repository Setup

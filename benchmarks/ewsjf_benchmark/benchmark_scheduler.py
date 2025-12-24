@@ -51,7 +51,7 @@ async def main_ewsjf(sampling_params, prompts, rates, model_name, tensor_paralle
     )
 
     for rate in rates:
-        await run_engine(engine_args, prompts, sampling_params, rate)
+        await run_engine(engine_args, prompts, sampling_params, rate, "EWSJF")
 
 
 async def main_fcfs(sampling_params, prompts, rates, model_name, tensor_parallel_size):
@@ -61,7 +61,7 @@ async def main_fcfs(sampling_params, prompts, rates, model_name, tensor_parallel
     )
 
     for rate in rates:
-        await run_engine(engine_args, prompts, sampling_params, rate)
+        await run_engine(engine_args, prompts, sampling_params, rate, "FCFS")
 
 
 async def main(sampling_params, prompts, rates, model_name, tensor_parallel_size, mode):
@@ -74,7 +74,7 @@ async def main(sampling_params, prompts, rates, model_name, tensor_parallel_size
         await main_fcfs(sampling_params, prompts, rates, model_name, tensor_parallel_size)
 
 
-async def run_engine(engine_args, prompts, sampling_params, rate):
+async def run_engine(engine_args, prompts, sampling_params, rate, scheduler_name):
     engine = AsyncLLMEngine.from_engine_args(engine_args)
 
     start = time.time()
@@ -89,7 +89,7 @@ async def run_engine(engine_args, prompts, sampling_params, rate):
 
     duration = end - start
 
-    await metrics(duration, prompts, outputs)
+    await metrics(duration, prompts, outputs, scheduler_name)
 
     print("\nGenerated Outputs:\n" + "-" * 60)
     print("Num answers: ", len(outputs))
@@ -97,12 +97,13 @@ async def run_engine(engine_args, prompts, sampling_params, rate):
     print(f"Total execution time (until all requests complete): {duration:.2f} seconds")
 
 
-async def metrics(total_runtime, prompts, outputs):
+async def metrics(total_runtime, prompts, outputs, scheduler_name):
     num_requests = len(prompts)
     total_generated_tokens = 0
     total_prompt_tokens = 0
 
     print("\n--- Aggregating Metrics ---")
+    print(f"\n --- Scheduler: {scheduler_name} ---")
     for output in outputs:
         prompt_len = len(output.prompt_token_ids)
         generated_len = len(output.outputs[0].token_ids)
