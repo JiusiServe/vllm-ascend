@@ -30,9 +30,8 @@ from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole)
 from vllm.distributed.parallel_state import get_tp_group, get_world_group
-from vllm.logger import init_logger
 from vllm.multimodal.inputs import MultiModalFeatureSpec
-from vllm.utils import split_host_port
+from vllm.utils import logger, split_host_port
 from vllm.v1.attention.backends.mla.common import MLACommonMetadata
 from vllm.v1.core.kv_cache_utils import _gen_mm_extra_hash_keys
 from vllm.v1.core.sched.output import SchedulerOutput
@@ -50,8 +49,6 @@ ENABLE_PREFIX_CACHING = int(os.getenv("USING_PREFIX_CONNECTOR", "1"))
 FUTURE_TIMEOUT = int(os.getenv("FUTURE_TIMEOUT", "10000"))
 SYNC_FUTURE_TIMEOUT = int(os.getenv("SYNC_FUTURE_TIMEOUT", "1"))
 SLEEP_TIMEOUT = 0.005
-
-logger = init_logger(__name__)
 
 
 class RequestStatus(enum.IntEnum):
@@ -949,9 +946,10 @@ class YuanRongConnector(KVConnectorBase_V1):
             self._ds_cached_blocks[request.request_id] = prompt_blocks
 
             if self._do_async_save and num_external_computed_tokens > 0:
-                logger.info("Req: %s, Computed: %d, External computed: %d",
-                            request.request_id, num_computed_tokens,
-                            num_external_computed_tokens)
+                logger.info(
+                    "Req: %s, Computed tokens: %d, External computed tokens: %d",
+                    request.request_id, num_computed_tokens,
+                    num_external_computed_tokens)
                 return num_external_computed_tokens, True
 
             return num_external_computed_tokens, False
@@ -965,15 +963,19 @@ class YuanRongConnector(KVConnectorBase_V1):
                                         "-0", mm_features)
 
             if not keys:
-                logger.info("Req: %s, HBM hit: %d, need load: 0",
-                            request.request_id, num_computed_tokens)
+                logger.info(
+                    "Req: %s, Total tokens %d, HBM hit tokens: %d, "
+                    "External hit tokens: 0", request.request_id,
+                    request.num_tokens, num_computed_tokens)
                 return 0, False
 
             try:
                 exists = self._ds_tensor_client.exist(keys) + [False]
             except RuntimeError:
-                logger.info("Req: %s, Store check failed, need load: 0",
-                            request.request_id)
+                logger.info(
+                    "Req: %s, Total tokens %d, HBM hit tokens: %d, "
+                    "External hit tokens: 0", request.request_id,
+                    request.num_tokens, num_computed_tokens)
                 return 0, False
 
             num_external_hit_blocks = exists.index(False)
@@ -984,9 +986,11 @@ class YuanRongConnector(KVConnectorBase_V1):
                 request.
                 request_id] = num_external_hit_blocks + num_computed_blocks
 
-            logger.info("Req: %s, HBM hit: %d, External hit tokens: %d",
-                        request.request_id, num_computed_tokens,
-                        num_external_hit_tokens)
+            logger.info(
+                "Req: %s, Total tokens %d, HBM hit tokens: %d, "
+                "External hit tokens: %d", request.request_id,
+                request.num_tokens, num_computed_tokens,
+                num_external_hit_tokens)
 
             if self._do_async_save and num_external_hit_tokens > 0:
                 return num_external_hit_tokens, True
