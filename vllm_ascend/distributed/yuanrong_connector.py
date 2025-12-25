@@ -30,9 +30,8 @@ from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole)
 from vllm.distributed.parallel_state import get_tp_group, get_world_group
-from vllm.logger import init_logger
 from vllm.multimodal.inputs import MultiModalFeatureSpec
-from vllm.utils import split_host_port
+from vllm.utils import logger, split_host_port
 from vllm.v1.attention.backends.mla.common import MLACommonMetadata
 from vllm.v1.core.kv_cache_utils import _gen_mm_extra_hash_keys
 from vllm.v1.core.sched.output import SchedulerOutput
@@ -50,8 +49,6 @@ ENABLE_PREFIX_CACHING = int(os.getenv("USING_PREFIX_CONNECTOR", "1"))
 FUTURE_TIMEOUT = int(os.getenv("FUTURE_TIMEOUT", "10000"))
 SYNC_FUTURE_TIMEOUT = int(os.getenv("SYNC_FUTURE_TIMEOUT", "1"))
 SLEEP_TIMEOUT = 0.005
-
-logger = init_logger(f"vllm.{__name__}")
 
 
 class RequestStatus(enum.IntEnum):
