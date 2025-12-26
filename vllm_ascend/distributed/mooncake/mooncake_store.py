@@ -8,6 +8,7 @@ import torch
 # Third Party
 from mooncake.store import ReplicateConfig  # type: ignore
 from vllm.config import VllmConfig
+from vllm.distributed.ec_transfer.utils.transfer_engine import get_global_te
 from vllm.distributed.parallel_state import get_tensor_model_parallel_rank
 from vllm.utils import get_ip, logger
 
@@ -71,7 +72,7 @@ class Mooncakestore():
                                    self.config.protocol,
                                    self.config.device_name,
                                    self.config.master_server_address)
-        else:
+        elif self.config.protocol == "tcp":
             local_hostname = self.config.local_hostname
             ret = self.store.setup(local_hostname, self.config.metadata_server,
                                    self.config.global_segment_size,
@@ -79,20 +80,35 @@ class Mooncakestore():
                                    self.config.protocol,
                                    self.config.device_name,
                                    self.config.master_server_address)
+            self.tensor_pool = TensorMemoryPool(
+                max_block_size=self.config.fast_transfer_buffer_size *
+                DEFAULT_TENSOR_POOL_SIZE)
+            self.store.register_buffer(
+                self.tensor_pool.base_address,
+                self.config.fast_transfer_buffer_size *
+                DEFAULT_TENSOR_POOL_SIZE)
+            self.fifo_pool_queue: deque[MooncakeTensorPoolMetadata] = deque()
+            self.replica_config = ReplicateConfig()
+            self.replica_config.replica_num = 1
+        else:
+            # This is for ADXL. If ascend direct transport is on,
+            # global transfer engine for an instance is required
+            local_hostname = get_ip()
+            transfer_engine = get_global_te(local_hostname, device_name=None)
+            self.local_seg = local_hostname + ":" + str(
+                transfer_engine.get_rpc_port())
+            ret = self.store.setup(self.local_seg, self.config.metadata_server,
+                                   self.config.global_segment_size,
+                                   self.config.local_buffer_size,
+                                   self.config.protocol,
+                                   self.config.device_name,
+                                   self.config.master_server_address,
+                                   transfer_engine.get_engine())
+
         if ret != 0:
             msg = "Initialize mooncake failed."
             logger.error(msg)
             raise RuntimeError(msg)
-        self.tensor_pool = TensorMemoryPool(
-            max_block_size=self.config.fast_transfer_buffer_size *
-            DEFAULT_TENSOR_POOL_SIZE)
-        self.store.register_buffer(
-            self.tensor_pool.base_address,
-            self.config.fast_transfer_buffer_size * DEFAULT_TENSOR_POOL_SIZE)
-        self.fifo_pool_queue: deque[MooncakeTensorPoolMetadata] = deque()
-
-        self.replica_config = ReplicateConfig()
-        self.replica_config.replica_num = 1
 
     def exists(self, key: MooncakeEngineKey) -> bool:
         return self.store.is_exist(key.to_string()) == 1

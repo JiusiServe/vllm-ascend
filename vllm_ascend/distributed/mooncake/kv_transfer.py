@@ -183,7 +183,7 @@ class KVCacheStoreSendingThread(KVTransferThread):
             key_list = []
             blockIds = []
             for start, end, key in self.token_database.process_tokens(
-                    tokens, mask):
+                    tokens, mask, mm_features):
                 addr, size, block_id = self.prepare_value(
                     start, end, block_ids)
                 key_list.append(key.to_string())
@@ -210,7 +210,7 @@ class KVCacheStoreSendingThread(KVTransferThread):
         else:
             torch.npu.current_stream().synchronize()
             for start, end, key in self.token_database.process_tokens(
-                    tokens, mask):
+                    tokens, mask, mm_features):
                 addr, size, _ = self.prepare_value(start, end, block_ids)
                 self.m_store.put(key, addr, size)
         if is_last_chunk:
@@ -253,7 +253,7 @@ class KVCacheStoreRecvingThread(KVTransferThread):
             key_list = []
             blockIds = []
             for start, end, key in self.token_database.process_tokens(
-                    tokens, mask):
+                    tokens, mask, mm_features):
                 addr, size, block_id = self.prepare_value(
                     start, end, block_ids)
                 key_list.append(key.to_string())
@@ -277,7 +277,7 @@ class KVCacheStoreRecvingThread(KVTransferThread):
             self.m_store.get_batch_tcp(key_list, k_caches, v_caches, blockIds)
         else:
             for start, end, key in self.token_database.process_tokens(
-                    tokens, mask):
+                    tokens, mask, mm_features):
                 addr, size, _ = self.prepare_value(start, end, block_ids)
                 self.m_store.get(key, addr, size)
         self.set_finished_request(req_id)
