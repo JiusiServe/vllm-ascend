@@ -40,6 +40,7 @@ class MooncakeEngine:
         self.kv_role = vllm_config.kv_transfer_config.kv_role
         self.load_async = vllm_config.kv_transfer_config.kv_connector_extra_config.get(
             "load_async", False)
+        # if use adxl, set `register_buffer` True
         self.register_buffer = vllm_config.kv_transfer_config.kv_connector_extra_config.get(
             "register_buffer", False)
         self.block_size = vllm_config.cache_config.block_size
@@ -219,7 +220,7 @@ class MooncakeEngine:
                         key_list = []
                         blockIds = []
                         for start, end, key in self.token_database.process_tokens(
-                                tokens, token_mask):
+                                tokens, token_mask, mm_features):
                             addr, size, block_id = self.prepare_value(
                                 start, end, request.block_ids)
                             key_list.append(key.to_string())
@@ -245,7 +246,7 @@ class MooncakeEngine:
                                                    v_caches, blockIds)
                     else:
                         for start, end, key in self.token_database.process_tokens(
-                                tokens, token_mask):
+                                tokens, token_mask, mm_features):
                             addr, size, _ = self.prepare_value(
                                 start, end, request.block_ids)
                             self.m_store.get(key, addr, size)
