@@ -14,7 +14,10 @@
 # limitations under the License.
 # This file is a part of the vllm-ascend project.
 #
-
+import importlib
+import inspect
+import json
+import os
 from dataclasses import dataclass, fields
 from typing import Type, Union
 
@@ -29,6 +32,7 @@ class AscendSchedulerConfig(SchedulerConfig):
         "vllm_ascend.core.scheduler.AscendScheduler")
     enable_pd_transfer: bool = False
     decode_max_num_seqs: int = 0
+    external_parameters = None
 
     @classmethod
     def initialize_from_config(
@@ -43,8 +47,15 @@ class AscendSchedulerConfig(SchedulerConfig):
         # Override default values into original SchedulerConfig
         scheduler_config["enable_chunked_prefill"] = False
         scheduler_config["policy"] = "fcfs"
-        scheduler_config["scheduler_cls"] = (
-            "vllm_ascend.core.scheduler.AscendScheduler")
+
+        if scheduler_config["scheduler_cls"] == "ewsjf":
+            scheduler_config["scheduler_cls"] = (
+                "vllm_ascend.core.ewsjf_scheduler.scheduler.EWSJFAscendScheduler")
+        else:
+            scheduler_config["scheduler_cls"] = (
+                "vllm_ascend.core.scheduler.AscendScheduler")
+        print(f'-------------------------------------scheduler: {scheduler_config["scheduler_cls"]}----------------------')
+
         scheduler_config["enable_pd_transfer"] = False
         scheduler_config["decode_max_num_seqs"] = 0
         # Override params in original SchedulerConfig with params in ascend_scheduler_config
@@ -78,3 +89,19 @@ class AscendSchedulerConfig(SchedulerConfig):
             raise NotImplementedError(
                 "currently AscendScheduler doesn't support scheduler_delay_factor."
             )
+        self.load_external_parameters()
+
+    def load_external_parameters(self):
+        module_name, class_name = self.scheduler_cls.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        cls = getattr(module, class_name)
+
+        module_file = inspect.getfile(cls)
+        module_dir = os.path.dirname(module_file)
+
+        config_path = os.path.join(module_dir, "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                self.external_parameters = json.load(f)
+                print(
+                    f'--------------------------------------Loading external parameters: {self.external_parameters}----------------------')
